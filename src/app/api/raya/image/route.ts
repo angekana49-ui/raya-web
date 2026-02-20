@@ -2,34 +2,60 @@
  * RAYA Chat API - Image/Multimodal Endpoint
  * POST /api/raya/image
  *
- * TEMPORARY: Using OpenAI-compatible API (Groq) as a bridge.
- * When Gemini billing is ready, this will be reverted to use
- * @google/genai with full multimodal (chatWithImage) support.
- * For now, images are not processed — only text is sent.
+ * Full image support with Gemini (primary)
+ * Falls back to text-only if OpenAI provider is used
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import { RayaAIService, ProgressionState } from '@/services/raya-ai.service';
+import { RayaAIService, ProgressionState, AIProvider } from '@/services/raya-ai.service';
+import * as fs from 'fs';
+import * as path from 'path';
 
 const getRayaInstance = () => {
-  const apiKey = process.env.RAYA_API_KEY;
-  if (!apiKey) {
-    throw new Error('RAYA_API_KEY not configured');
+  const provider = (process.env.RAYA_PROVIDER || 'gemini') as AIProvider;
+
+  // Gemini configuration (supports images)
+  if (provider === 'gemini') {
+    const apiKey = process.env.GEMINI_API_KEY;
+    if (!apiKey) {
+      throw new Error('GEMINI_API_KEY not configured');
+    }
+
+    return new RayaAIService({
+      provider: 'gemini',
+      apiKey,
+      model: process.env.GEMINI_MODEL || 'gemini-2.0-flash-thinking-exp-01-21',
+      temperature: parseFloat(process.env.RAYA_TEMPERATURE || '0.75'),
+      maxTokens: parseInt(process.env.RAYA_MAX_TOKENS || '4096'),
+      thinkingBudget: parseInt(process.env.GEMINI_THINKING_BUDGET || '8192'),
+    });
   }
 
-  return new RayaAIService({
-    apiKey,
-    baseURL: process.env.RAYA_BASE_URL || 'https://api.groq.com/openai/v1',
-    model: process.env.RAYA_MODEL || 'llama-3.3-70b-versatile',
-    temperature: parseFloat(process.env.RAYA_TEMPERATURE || '0.75'),
-    maxTokens: parseInt(process.env.RAYA_MAX_TOKENS || '4096'),
-  });
+  // OpenAI configuration (fallback - no image support)
+  else {
+    const apiKey = process.env.RAYA_API_KEY;
+    if (!apiKey) {
+      throw new Error('RAYA_API_KEY not configured');
+    }
+
+    return new RayaAIService({
+      provider: 'openai',
+      apiKey,
+      baseURL: process.env.RAYA_BASE_URL || 'https://api.openai.com/v1',
+      model: process.env.RAYA_MODEL || 'gpt-4o-mini',
+      temperature: parseFloat(process.env.RAYA_TEMPERATURE || '0.75'),
+      maxTokens: parseInt(process.env.RAYA_MAX_TOKENS || '4096'),
+    });
+  }
 };
 
 export async function POST(req: NextRequest) {
+  const tempFilePath: string | null = null;
+
   try {
     const formData = await req.formData();
     const message = formData.get('message') as string;
+    const image = formData.get('image') as File;
     const userTier = (formData.get('userTier') as string) || 'free';
     const progressionStateStr = formData.get('progressionState') as string;
     const conversationHistoryStr = formData.get('conversationHistory') as string;
@@ -39,6 +65,13 @@ export async function POST(req: NextRequest) {
     if (!message || typeof message !== 'string') {
       return NextResponse.json(
         { error: 'Message is required' },
+        { status: 400 }
+      );
+    }
+
+    if (!image) {
+      return NextResponse.json(
+        { error: 'Image is required for this endpoint' },
         { status: 400 }
       );
     }
@@ -53,18 +86,39 @@ export async function POST(req: NextRequest) {
 
     // Initialize RAYA
     const raya = getRayaInstance();
+    const provider = process.env.RAYA_PROVIDER || 'gemini';
 
     // Restore conversation history if provided
     if (conversationHistory && Array.isArray(conversationHistory)) {
       raya.setHistory(conversationHistory);
     }
 
-    // TEMPORARY: Send as text-only (full image support returns with Gemini)
-    const response = await raya.chat(
-      message,
-      userTier as 'free' | 'premium',
-      progressionState as ProgressionState | undefined
-    );
+    let response;
+
+    // Gemini: Full image support
+    if (provider === 'gemini') {
+      // Convert image to base64
+      const arrayBuffer = await image.arrayBuffer();
+      const buffer = Buffer.from(arrayBuffer);
+      const base64Image = buffer.toString('base64');
+
+      response = await raya.chatWithImage(
+        message,
+        base64Image,
+        image.type || 'image/png',
+        userTier as 'free' | 'premium',
+        progressionState as ProgressionState | undefined
+      );
+    }
+    // OpenAI: Fallback to text-only
+    else {
+      console.warn('Image support not available with OpenAI provider. Sending text-only.');
+      response = await raya.chat(
+        `${message} [Note: Image was provided but not processed - OpenAI fallback mode]`,
+        userTier as 'free' | 'premium',
+        progressionState as ProgressionState | undefined
+      );
+    }
 
     // Return response
     return NextResponse.json({

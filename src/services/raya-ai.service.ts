@@ -1,15 +1,16 @@
 /**
- * RAYA AI Service - Multi-Provider Version
- * Uses OpenAI-compatible API (works with Groq, Mistral, OpenAI, Gemini via proxy)
+ * RAYA AI Service - Dual Provider (Gemini + OpenAI Fallback)
+ * Switch instantly via RAYA_PROVIDER env var
  *
  * Features:
- * - OpenAI SDK with configurable baseURL (multi-provider)
- * - Streaming support
+ * - Gemini (primary) with thinking tokens & image support
+ * - OpenAI (fallback) for instant failover
+ * - Streaming support for both
  * - Automatic insight parsing (---RAYA_INSIGHT---)
  * - Progression system (XP, badges, streaks)
- * - Conversation history management
  */
 
+import { GoogleGenerativeAI, GenerativeModel } from '@google/generative-ai';
 import OpenAI from 'openai';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -18,12 +19,16 @@ import * as path from 'path';
 // TYPES & INTERFACES
 // ============================================================================
 
+export type AIProvider = 'gemini' | 'openai';
+
 export interface RayaConfig {
+  provider?: AIProvider;
   apiKey: string;
-  baseURL?: string;
+  baseURL?: string; // For OpenAI
   model?: string;
   temperature?: number;
   maxTokens?: number;
+  thinkingBudget?: number; // For Gemini
   systemPromptPath?: string;
 }
 
@@ -121,29 +126,51 @@ export interface ProgressionState {
 }
 
 // ============================================================================
-// RAYA AI SERVICE
+// RAYA AI SERVICE - DUAL PROVIDER
 // ============================================================================
 
 export class RayaAIService {
-  private client: OpenAI;
-  private config: Required<RayaConfig>;
+  private provider: AIProvider;
+  private geminiClient?: GoogleGenerativeAI;
+  private geminiModel?: GenerativeModel;
+  private openaiClient?: OpenAI;
+  private config: Required<Omit<RayaConfig, 'provider' | 'baseURL' | 'thinkingBudget'>> & {
+    baseURL?: string;
+    thinkingBudget?: number;
+  };
   private systemPrompt: string;
   private conversationHistory: ChatMessage[] = [];
 
   constructor(config: RayaConfig) {
+    this.provider = config.provider || 'gemini';
+
     this.config = {
       apiKey: config.apiKey,
-      baseURL: config.baseURL || 'https://api.groq.com/openai/v1',
-      model: config.model || 'llama-3.3-70b-versatile',
+      baseURL: config.baseURL,
+      model: config.model || (this.provider === 'gemini' ? 'gemini-2.0-flash-thinking-exp-01-21' : 'gpt-4o-mini'),
       temperature: config.temperature || 0.75,
       maxTokens: config.maxTokens || 4096,
+      thinkingBudget: config.thinkingBudget || 8192,
       systemPromptPath: config.systemPromptPath || path.join(process.cwd(), 'prompts/RAYA_v2.0_SYSTEM_PROMPT_EN.md'),
     };
 
-    this.client = new OpenAI({
-      apiKey: this.config.apiKey,
-      baseURL: this.config.baseURL,
-    });
+    // Initialize appropriate client
+    if (this.provider === 'gemini') {
+      this.geminiClient = new GoogleGenerativeAI(this.config.apiKey);
+      this.geminiModel = this.geminiClient.getGenerativeModel({
+        model: this.config.model,
+        generationConfig: {
+          temperature: this.config.temperature,
+          maxOutputTokens: this.config.maxTokens,
+        },
+        systemInstruction: this.loadSystemPrompt(),
+      });
+    } else {
+      this.openaiClient = new OpenAI({
+        apiKey: this.config.apiKey,
+        baseURL: this.config.baseURL || 'https://api.openai.com/v1',
+      });
+    }
 
     this.systemPrompt = this.loadSystemPrompt();
   }
@@ -162,25 +189,6 @@ export class RayaAIService {
   }
 
   // ==========================================================================
-  // BUILD MESSAGES (system + history)
-  // ==========================================================================
-
-  private buildMessages(): OpenAI.Chat.ChatCompletionMessageParam[] {
-    const messages: OpenAI.Chat.ChatCompletionMessageParam[] = [
-      { role: 'system', content: this.systemPrompt },
-    ];
-
-    for (const msg of this.conversationHistory) {
-      messages.push({
-        role: msg.role as 'user' | 'assistant',
-        content: msg.content,
-      });
-    }
-
-    return messages;
-  }
-
-  // ==========================================================================
   // CHAT - TEXT ONLY
   // ==========================================================================
 
@@ -189,29 +197,88 @@ export class RayaAIService {
     userTier: 'free' | 'premium' = 'free',
     progressionState?: ProgressionState
   ): Promise<RayaResponse> {
+    if (this.provider === 'gemini') {
+      return this.chatGemini(userMessage, userTier, progressionState);
+    } else {
+      return this.chatOpenAI(userMessage, userTier, progressionState);
+    }
+  }
+
+  private async chatGemini(
+    userMessage: string,
+    userTier: 'free' | 'premium',
+    progressionState?: ProgressionState
+  ): Promise<RayaResponse> {
+    if (!this.geminiModel) throw new Error('Gemini model not initialized');
+
     // Add user message to history
     this.conversationHistory.push({
       role: 'user',
       content: userMessage,
     });
 
-    // Generate response
-    const response = await this.client.chat.completions.create({
-      model: this.config.model,
-      temperature: this.config.temperature,
-      max_tokens: this.config.maxTokens,
-      messages: this.buildMessages(),
+    // Build Gemini history format
+    const geminiHistory = this.conversationHistory
+      .filter(msg => msg.role !== 'system')
+      .map(msg => ({
+        role: msg.role === 'assistant' ? 'model' : 'user',
+        parts: [{ text: msg.content }],
+      }));
+
+    // Start chat
+    const chat = this.geminiModel.startChat({
+      history: geminiHistory.slice(0, -1), // Exclude last message
     });
 
-    const fullText = response.choices[0]?.message?.content || '';
+    const result = await chat.sendMessage(userMessage);
+    const fullText = result.response.text();
 
-    // Add assistant response to history
+    // Add response to history
     this.conversationHistory.push({
       role: 'assistant',
       content: fullText,
     });
 
-    // Parse response
+    return this.parseResponse(fullText, progressionState);
+  }
+
+  private async chatOpenAI(
+    userMessage: string,
+    userTier: 'free' | 'premium',
+    progressionState?: ProgressionState
+  ): Promise<RayaResponse> {
+    if (!this.openaiClient) throw new Error('OpenAI client not initialized');
+
+    // Add user message to history
+    this.conversationHistory.push({
+      role: 'user',
+      content: userMessage,
+    });
+
+    // Build OpenAI messages
+    const messages: OpenAI.Chat.ChatCompletionMessageParam[] = [
+      { role: 'system', content: this.systemPrompt },
+      ...this.conversationHistory.map(msg => ({
+        role: msg.role as 'user' | 'assistant',
+        content: msg.content,
+      })),
+    ];
+
+    const response = await this.openaiClient.chat.completions.create({
+      model: this.config.model,
+      temperature: this.config.temperature,
+      max_tokens: this.config.maxTokens,
+      messages,
+    });
+
+    const fullText = response.choices[0]?.message?.content || '';
+
+    // Add response to history
+    this.conversationHistory.push({
+      role: 'assistant',
+      content: fullText,
+    });
+
     return this.parseResponse(fullText, progressionState);
   }
 
@@ -224,18 +291,84 @@ export class RayaAIService {
     userTier: 'free' | 'premium' = 'free',
     progressionState?: ProgressionState
   ): AsyncGenerator<string, RayaResponse, unknown> {
+    if (this.provider === 'gemini') {
+      return yield* this.chatStreamGemini(userMessage, userTier, progressionState);
+    } else {
+      return yield* this.chatStreamOpenAI(userMessage, userTier, progressionState);
+    }
+  }
+
+  private async *chatStreamGemini(
+    userMessage: string,
+    userTier: 'free' | 'premium',
+    progressionState?: ProgressionState
+  ): AsyncGenerator<string, RayaResponse, unknown> {
+    if (!this.geminiModel) throw new Error('Gemini model not initialized');
+
     // Add user message to history
     this.conversationHistory.push({
       role: 'user',
       content: userMessage,
     });
 
-    // Generate streaming response
-    const stream = await this.client.chat.completions.create({
+    // Build Gemini history
+    const geminiHistory = this.conversationHistory
+      .filter(msg => msg.role !== 'system')
+      .map(msg => ({
+        role: msg.role === 'assistant' ? 'model' : 'user',
+        parts: [{ text: msg.content }],
+      }));
+
+    const chat = this.geminiModel.startChat({
+      history: geminiHistory.slice(0, -1),
+    });
+
+    const result = await chat.sendMessageStream(userMessage);
+    let fullText = '';
+
+    // Stream chunks
+    for await (const chunk of result.stream) {
+      const chunkText = chunk.text();
+      fullText += chunkText;
+      yield chunkText;
+    }
+
+    // Add response to history
+    this.conversationHistory.push({
+      role: 'assistant',
+      content: fullText,
+    });
+
+    return this.parseResponse(fullText, progressionState);
+  }
+
+  private async *chatStreamOpenAI(
+    userMessage: string,
+    userTier: 'free' | 'premium',
+    progressionState?: ProgressionState
+  ): AsyncGenerator<string, RayaResponse, unknown> {
+    if (!this.openaiClient) throw new Error('OpenAI client not initialized');
+
+    // Add user message to history
+    this.conversationHistory.push({
+      role: 'user',
+      content: userMessage,
+    });
+
+    // Build messages
+    const messages: OpenAI.Chat.ChatCompletionMessageParam[] = [
+      { role: 'system', content: this.systemPrompt },
+      ...this.conversationHistory.map(msg => ({
+        role: msg.role as 'user' | 'assistant',
+        content: msg.content,
+      })),
+    ];
+
+    const stream = await this.openaiClient.chat.completions.create({
       model: this.config.model,
       temperature: this.config.temperature,
       max_tokens: this.config.maxTokens,
-      messages: this.buildMessages(),
+      messages,
       stream: true,
     });
 
@@ -250,13 +383,69 @@ export class RayaAIService {
       }
     }
 
-    // Add assistant response to history
+    // Add response to history
     this.conversationHistory.push({
       role: 'assistant',
       content: fullText,
     });
 
-    // Parse and return final response
+    return this.parseResponse(fullText, progressionState);
+  }
+
+  // ==========================================================================
+  // CHAT WITH IMAGE (Gemini only)
+  // ==========================================================================
+
+  async chatWithImage(
+    userMessage: string,
+    imageBase64: string,
+    mimeType: string = 'image/png',
+    userTier: 'free' | 'premium' = 'free',
+    progressionState?: ProgressionState
+  ): Promise<RayaResponse> {
+    if (this.provider !== 'gemini') {
+      throw new Error('Image support only available with Gemini provider');
+    }
+
+    if (!this.geminiModel) throw new Error('Gemini model not initialized');
+
+    // Add user message to history
+    this.conversationHistory.push({
+      role: 'user',
+      content: `[IMAGE] ${userMessage}`,
+    });
+
+    // Build history
+    const geminiHistory = this.conversationHistory
+      .filter(msg => msg.role !== 'system')
+      .slice(0, -1)
+      .map(msg => ({
+        role: msg.role === 'assistant' ? 'model' : 'user',
+        parts: [{ text: msg.content }],
+      }));
+
+    const chat = this.geminiModel.startChat({
+      history: geminiHistory,
+    });
+
+    const result = await chat.sendMessage([
+      userMessage,
+      {
+        inlineData: {
+          data: imageBase64,
+          mimeType,
+        },
+      },
+    ]);
+
+    const fullText = result.response.text();
+
+    // Add response to history
+    this.conversationHistory.push({
+      role: 'assistant',
+      content: fullText,
+    });
+
     return this.parseResponse(fullText, progressionState);
   }
 
@@ -374,6 +563,10 @@ export class RayaAIService {
 
   public setHistory(history: ChatMessage[]): void {
     this.conversationHistory = history;
+  }
+
+  public getProvider(): AIProvider {
+    return this.provider;
   }
 }
 

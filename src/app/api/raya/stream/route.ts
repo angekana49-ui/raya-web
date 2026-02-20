@@ -3,26 +3,50 @@
  * POST /api/raya/stream
  *
  * Returns Server-Sent Events (SSE) stream
- * Supports: Groq, Mistral, OpenAI (any OpenAI-compatible provider)
+ * Supports: Gemini (primary) + OpenAI (fallback)
+ * Switch via RAYA_PROVIDER env var (gemini|openai)
  */
 
 import { NextRequest } from 'next/server';
-import { RayaAIService, ProgressionState } from '@/services/raya-ai.service';
+import { RayaAIService, ProgressionState, AIProvider } from '@/services/raya-ai.service';
 import { saveMessage, updateConversation } from '@/services/supabase-chat.service';
 
 const getRayaInstance = () => {
-  const apiKey = process.env.RAYA_API_KEY;
-  if (!apiKey) {
-    throw new Error('RAYA_API_KEY not configured');
+  const provider = (process.env.RAYA_PROVIDER || 'gemini') as AIProvider;
+
+  // Gemini configuration
+  if (provider === 'gemini') {
+    const apiKey = process.env.GEMINI_API_KEY;
+    if (!apiKey) {
+      throw new Error('GEMINI_API_KEY not configured');
+    }
+
+    return new RayaAIService({
+      provider: 'gemini',
+      apiKey,
+      model: process.env.GEMINI_MODEL || 'gemini-2.0-flash-thinking-exp-01-21',
+      temperature: parseFloat(process.env.RAYA_TEMPERATURE || '0.75'),
+      maxTokens: parseInt(process.env.RAYA_MAX_TOKENS || '4096'),
+      thinkingBudget: parseInt(process.env.GEMINI_THINKING_BUDGET || '8192'),
+    });
   }
 
-  return new RayaAIService({
-    apiKey,
-    baseURL: process.env.RAYA_BASE_URL || 'https://api.groq.com/openai/v1',
-    model: process.env.RAYA_MODEL || 'llama-3.3-70b-versatile',
-    temperature: parseFloat(process.env.RAYA_TEMPERATURE || '0.75'),
-    maxTokens: parseInt(process.env.RAYA_MAX_TOKENS || '4096'),
-  });
+  // OpenAI configuration (fallback)
+  else {
+    const apiKey = process.env.RAYA_API_KEY;
+    if (!apiKey) {
+      throw new Error('RAYA_API_KEY not configured');
+    }
+
+    return new RayaAIService({
+      provider: 'openai',
+      apiKey,
+      baseURL: process.env.RAYA_BASE_URL || 'https://api.openai.com/v1',
+      model: process.env.RAYA_MODEL || 'gpt-4o-mini',
+      temperature: parseFloat(process.env.RAYA_TEMPERATURE || '0.75'),
+      maxTokens: parseInt(process.env.RAYA_MAX_TOKENS || '4096'),
+    });
+  }
 };
 
 export async function POST(req: NextRequest) {
@@ -108,10 +132,15 @@ export async function POST(req: NextRequest) {
 
           // Save assistant message to DB after streaming completes
           if (conversationId && fullText) {
+            const provider = process.env.RAYA_PROVIDER || 'gemini';
+            const modelUsed = provider === 'gemini'
+              ? (process.env.GEMINI_MODEL || 'gemini-2.0-flash-thinking-exp-01-21')
+              : (process.env.RAYA_MODEL || 'gpt-4o-mini');
+
             await saveMessage(conversationId, {
               sender: 'assistant',
               text: fullText,
-              model_used: process.env.RAYA_MODEL || 'llama-3.3-70b-versatile',
+              model_used: modelUsed,
               mode_used: aiMode || 'normal',
             });
 
