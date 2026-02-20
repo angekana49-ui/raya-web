@@ -3,14 +3,14 @@
  * Switch instantly via RAYA_PROVIDER env var
  *
  * Features:
- * - Gemini (primary) with thinking tokens & image support
+ * - Gemini (primary) with thinking tokens & Google Search
  * - OpenAI (fallback) for instant failover
  * - Streaming support for both
  * - Automatic insight parsing (---RAYA_INSIGHT---)
  * - Progression system (XP, badges, streaks)
  */
 
-import { GoogleGenerativeAI, GenerativeModel } from '@google/generative-ai';
+import { GoogleGenAI } from '@google/genai';
 import OpenAI from 'openai';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -29,6 +29,7 @@ export interface RayaConfig {
   temperature?: number;
   maxTokens?: number;
   thinkingBudget?: number; // For Gemini
+  enableTools?: boolean; // Enable Google Search for Gemini
   systemPromptPath?: string;
 }
 
@@ -131,12 +132,12 @@ export interface ProgressionState {
 
 export class RayaAIService {
   private provider: AIProvider;
-  private geminiClient?: GoogleGenerativeAI;
-  private geminiModel?: GenerativeModel;
+  private geminiClient?: GoogleGenAI;
   private openaiClient?: OpenAI;
-  private config: Required<Omit<RayaConfig, 'provider' | 'baseURL' | 'thinkingBudget'>> & {
+  private config: Required<Omit<RayaConfig, 'provider' | 'baseURL' | 'thinkingBudget' | 'enableTools'>> & {
     baseURL?: string;
     thinkingBudget?: number;
+    enableTools?: boolean;
   };
   private systemPrompt: string;
   private conversationHistory: ChatMessage[] = [];
@@ -147,23 +148,18 @@ export class RayaAIService {
     this.config = {
       apiKey: config.apiKey,
       baseURL: config.baseURL,
-      model: config.model || (this.provider === 'gemini' ? 'gemini-2.0-flash-thinking-exp-01-21' : 'gpt-4o-mini'),
+      model: config.model || (this.provider === 'gemini' ? 'gemini-flash-lite-latest' : 'gpt-4o-mini'),
       temperature: config.temperature || 0.75,
       maxTokens: config.maxTokens || 4096,
-      thinkingBudget: config.thinkingBudget || 8192,
+      thinkingBudget: config.thinkingBudget || 24576,
+      enableTools: config.enableTools ?? false,
       systemPromptPath: config.systemPromptPath || path.join(process.cwd(), 'prompts/RAYA_v2.0_SYSTEM_PROMPT_EN.md'),
     };
 
     // Initialize appropriate client
     if (this.provider === 'gemini') {
-      this.geminiClient = new GoogleGenerativeAI(this.config.apiKey);
-      this.geminiModel = this.geminiClient.getGenerativeModel({
-        model: this.config.model,
-        generationConfig: {
-          temperature: this.config.temperature,
-          maxOutputTokens: this.config.maxTokens,
-        },
-        systemInstruction: this.loadSystemPrompt(),
+      this.geminiClient = new GoogleGenAI({
+        apiKey: this.config.apiKey,
       });
     } else {
       this.openaiClient = new OpenAI({
@@ -189,6 +185,19 @@ export class RayaAIService {
   }
 
   // ==========================================================================
+  // BUILD GEMINI CONTENTS (with system instruction)
+  // ==========================================================================
+
+  private buildGeminiContents() {
+    return this.conversationHistory
+      .filter(msg => msg.role !== 'system')
+      .map(msg => ({
+        role: msg.role === 'assistant' ? 'model' : 'user',
+        parts: [{ text: msg.content }],
+      }));
+  }
+
+  // ==========================================================================
   // CHAT - TEXT ONLY
   // ==========================================================================
 
@@ -209,7 +218,7 @@ export class RayaAIService {
     userTier: 'free' | 'premium',
     progressionState?: ProgressionState
   ): Promise<RayaResponse> {
-    if (!this.geminiModel) throw new Error('Gemini model not initialized');
+    if (!this.geminiClient) throw new Error('Gemini client not initialized');
 
     // Add user message to history
     this.conversationHistory.push({
@@ -217,21 +226,29 @@ export class RayaAIService {
       content: userMessage,
     });
 
-    // Build Gemini history format
-    const geminiHistory = this.conversationHistory
-      .filter(msg => msg.role !== 'system')
-      .map(msg => ({
-        role: msg.role === 'assistant' ? 'model' : 'user',
-        parts: [{ text: msg.content }],
-      }));
+    // Build config
+    const tools = this.config.enableTools ? [{ googleSearch: {} }] : undefined;
+    const config: any = {
+      systemInstruction: this.systemPrompt,
+      thinkingConfig: {
+        thinkingBudget: this.config.thinkingBudget,
+      },
+    };
+    if (tools) {
+      config.tools = tools;
+    }
 
-    // Start chat
-    const chat = this.geminiModel.startChat({
-      history: geminiHistory.slice(0, -1), // Exclude last message
+    // Build contents
+    const contents = this.buildGeminiContents();
+
+    // Generate response
+    const response = await this.geminiClient.models.generateContent({
+      model: this.config.model,
+      config,
+      contents,
     });
 
-    const result = await chat.sendMessage(userMessage);
-    const fullText = result.response.text();
+    const fullText = response.text || '';
 
     // Add response to history
     this.conversationHistory.push({
@@ -303,7 +320,7 @@ export class RayaAIService {
     userTier: 'free' | 'premium',
     progressionState?: ProgressionState
   ): AsyncGenerator<string, RayaResponse, unknown> {
-    if (!this.geminiModel) throw new Error('Gemini model not initialized');
+    if (!this.geminiClient) throw new Error('Gemini client not initialized');
 
     // Add user message to history
     this.conversationHistory.push({
@@ -311,26 +328,37 @@ export class RayaAIService {
       content: userMessage,
     });
 
-    // Build Gemini history
-    const geminiHistory = this.conversationHistory
-      .filter(msg => msg.role !== 'system')
-      .map(msg => ({
-        role: msg.role === 'assistant' ? 'model' : 'user',
-        parts: [{ text: msg.content }],
-      }));
+    // Build config
+    const tools = this.config.enableTools ? [{ googleSearch: {} }] : undefined;
+    const config: any = {
+      systemInstruction: this.systemPrompt,
+      thinkingConfig: {
+        thinkingBudget: this.config.thinkingBudget,
+      },
+    };
+    if (tools) {
+      config.tools = tools;
+    }
 
-    const chat = this.geminiModel.startChat({
-      history: geminiHistory.slice(0, -1),
+    // Build contents
+    const contents = this.buildGeminiContents();
+
+    // Generate streaming response
+    const response = await this.geminiClient.models.generateContentStream({
+      model: this.config.model,
+      config,
+      contents,
     });
 
-    const result = await chat.sendMessageStream(userMessage);
     let fullText = '';
 
     // Stream chunks
-    for await (const chunk of result.stream) {
-      const chunkText = chunk.text();
-      fullText += chunkText;
-      yield chunkText;
+    for await (const chunk of response) {
+      const chunkText = chunk.text || '';
+      if (chunkText) {
+        fullText += chunkText;
+        yield chunkText;
+      }
     }
 
     // Add response to history
@@ -407,7 +435,7 @@ export class RayaAIService {
       throw new Error('Image support only available with Gemini provider');
     }
 
-    if (!this.geminiModel) throw new Error('Gemini model not initialized');
+    if (!this.geminiClient) throw new Error('Gemini client not initialized');
 
     // Add user message to history
     this.conversationHistory.push({
@@ -415,30 +443,42 @@ export class RayaAIService {
       content: `[IMAGE] ${userMessage}`,
     });
 
-    // Build history
-    const geminiHistory = this.conversationHistory
-      .filter(msg => msg.role !== 'system')
-      .slice(0, -1)
-      .map(msg => ({
-        role: msg.role === 'assistant' ? 'model' : 'user',
-        parts: [{ text: msg.content }],
-      }));
+    // Build config
+    const tools = this.config.enableTools ? [{ googleSearch: {} }] : undefined;
+    const config: any = {
+      systemInstruction: this.systemPrompt,
+      thinkingConfig: {
+        thinkingBudget: this.config.thinkingBudget,
+      },
+    };
+    if (tools) {
+      config.tools = tools;
+    }
 
-    const chat = this.geminiModel.startChat({
-      history: geminiHistory,
+    // Build contents with image
+    const contents = [
+      ...this.buildGeminiContents().slice(0, -1), // Exclude last message
+      {
+        role: 'user',
+        parts: [
+          { text: userMessage },
+          {
+            inlineData: {
+              data: imageBase64,
+              mimeType,
+            },
+          },
+        ],
+      },
+    ];
+
+    const response = await this.geminiClient.models.generateContent({
+      model: this.config.model,
+      config,
+      contents,
     });
 
-    const result = await chat.sendMessage([
-      userMessage,
-      {
-        inlineData: {
-          data: imageBase64,
-          mimeType,
-        },
-      },
-    ]);
-
-    const fullText = result.response.text();
+    const fullText = response.text || '';
 
     // Add response to history
     this.conversationHistory.push({

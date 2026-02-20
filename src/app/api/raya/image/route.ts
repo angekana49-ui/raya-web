@@ -24,10 +24,11 @@ const getRayaInstance = () => {
     return new RayaAIService({
       provider: 'gemini',
       apiKey,
-      model: process.env.GEMINI_MODEL || 'gemini-2.0-flash-thinking-exp-01-21',
+      model: process.env.GEMINI_MODEL || 'gemini-flash-lite-latest',
       temperature: parseFloat(process.env.RAYA_TEMPERATURE || '0.75'),
       maxTokens: parseInt(process.env.RAYA_MAX_TOKENS || '4096'),
-      thinkingBudget: parseInt(process.env.GEMINI_THINKING_BUDGET || '8192'),
+      thinkingBudget: parseInt(process.env.GEMINI_THINKING_BUDGET || '24576'),
+      enableTools: process.env.GEMINI_ENABLE_TOOLS === 'true',
     });
   }
 
