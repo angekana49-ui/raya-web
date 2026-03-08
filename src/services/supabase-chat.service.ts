@@ -2,6 +2,20 @@ import { supabaseAdmin } from '@/lib/supabase/server'
 
 // ---------- CONVERSATIONS ----------
 
+export async function assertConversationOwnership(userId: string, conversationId: string) {
+  const { data, error } = await supabaseAdmin
+    .from('conversations')
+    .select('id')
+    .eq('id', conversationId)
+    .eq('user_id', userId)
+    .maybeSingle()
+
+  if (error) throw error
+  if (!data) {
+    throw new Error('Conversation not found or access denied')
+  }
+}
+
 export async function getConversations(userId: string) {
   const { data, error } = await supabaseAdmin
     .from('conversations')
@@ -31,12 +45,22 @@ export async function createConversation(userId: string, title: string) {
 }
 
 export async function updateConversation(
+  userId: string,
   conversationId: string,
   updates: { title?: string; preview?: string; is_active?: boolean }
 ) {
+  await assertConversationOwnership(userId, conversationId)
+
+  // CRITICAL FIX: Prevent mass assignment. Since supabaseAdmin uses the Service Role key, RLS is bypassed.
+  // Passing user input directly into .update() allows attackers to overwrite ANY column (e.g., user_id).
+  const safeUpdates: Record<string, any> = {}
+  if (updates.title !== undefined) safeUpdates.title = updates.title
+  if (updates.preview !== undefined) safeUpdates.preview = updates.preview
+  if (updates.is_active !== undefined) safeUpdates.is_active = updates.is_active
+
   const { data, error } = await supabaseAdmin
     .from('conversations')
-    .update(updates)
+    .update(safeUpdates)
     .eq('id', conversationId)
     .select()
     .single()
@@ -45,7 +69,9 @@ export async function updateConversation(
   return data
 }
 
-export async function deleteConversation(conversationId: string) {
+export async function deleteConversation(userId: string, conversationId: string) {
+  await assertConversationOwnership(userId, conversationId)
+
   const { error } = await supabaseAdmin
     .from('conversations')
     .delete()
@@ -56,10 +82,12 @@ export async function deleteConversation(conversationId: string) {
 
 // ---------- MESSAGES ----------
 
-export async function getMessages(conversationId: string) {
+export async function getMessages(userId: string, conversationId: string) {
+  await assertConversationOwnership(userId, conversationId)
+
   const { data, error } = await supabaseAdmin
     .from('messages')
-    .select('id, sender, text, timestamp, has_files, model_used, mode_used, tokens_used')
+    .select('id, sender, text, timestamp, has_files, model_used, mode_used, tokens_used, parent_id')
     .eq('conversation_id', conversationId)
     .order('timestamp', { ascending: true })
 
@@ -68,6 +96,7 @@ export async function getMessages(conversationId: string) {
 }
 
 export async function saveMessage(
+  userId: string,
   conversationId: string,
   message: {
     sender: 'user' | 'assistant'
@@ -75,8 +104,11 @@ export async function saveMessage(
     model_used?: string
     mode_used?: string
     tokens_used?: number
+    parent_id?: string
   }
 ) {
+  await assertConversationOwnership(userId, conversationId)
+
   const { data, error } = await supabaseAdmin
     .from('messages')
     .insert({

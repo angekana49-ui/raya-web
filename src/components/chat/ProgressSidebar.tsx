@@ -39,6 +39,9 @@ interface ProgressSidebarProps {
   onShareBadge: (badge: BadgeItem) => void;
   onOpenEarnHearts: () => void;
   onOpenXPOverview: () => void;
+  isLoggedIn: boolean;
+  hasUnsavedProgress: boolean;
+  onSignUp: () => void;
 }
 
 // ─── Isolated countdown component ────────────────────────────────────────────
@@ -90,6 +93,9 @@ export default function ProgressSidebar({
   onShareBadge,
   onOpenEarnHearts,
   onOpenXPOverview,
+  isLoggedIn,
+  hasUnsavedProgress,
+  onSignUp,
 }: ProgressSidebarProps) {
   const { currentLevel, title: levelTitle, nextTitle, nextLevelXp, xpProgressPercent } = getLevelInfo(g.totalXp);
 
@@ -165,6 +171,35 @@ export default function ProgressSidebar({
           })}
         </div>
       </div>
+
+      {/* ── Sign-up nudge banner (guest only) ── */}
+      {!isLoggedIn && (
+        <div
+          className={`mx-2 mb-2 rounded-xl px-3 py-2.5 flex items-center gap-2.5 cursor-pointer transition-all ${
+            hasUnsavedProgress
+              ? "bg-[linear-gradient(135deg,#fef3c7_0%,#fde68a_100%)] border border-amber-300"
+              : "bg-[linear-gradient(135deg,#eef2ff_0%,#e0e7ff_100%)] border border-indigo-200"
+          }`}
+          onClick={onSignUp}
+        >
+          <span className="text-xl shrink-0">{hasUnsavedProgress ? "⚠️" : "🔒"}</span>
+          <div className="flex-1 min-w-0">
+            {hasUnsavedProgress ? (
+              <>
+                <p className="text-[11px] font-bold text-amber-800 leading-tight">
+                  {g.totalXp} XP · {g.completedMissionIds.length} mission{g.completedMissionIds.length > 1 ? "s" : ""} — not saved
+                </p>
+                <p className="text-[10px] text-amber-700 mt-0.5">Close this tab and it's gone. <span className="underline font-semibold">Create a free account →</span></p>
+              </>
+            ) : (
+              <>
+                <p className="text-[11px] font-bold text-indigo-800 leading-tight">Progress resets when you leave</p>
+                <p className="text-[10px] text-indigo-600 mt-0.5">Sign up free to keep your XP, streak & missions.</p>
+              </>
+            )}
+          </div>
+        </div>
+      )}
 
       <div className="flex-1 overflow-y-auto px-2 pb-2">
 
@@ -246,16 +281,20 @@ export default function ProgressSidebar({
                 <span className="text-[10px] text-rose-400">{g.hearts} stored · tap to earn</span>
               </div>
               <div className="flex items-center gap-1 mb-1.5">
-                {Array.from({ length: 5 }).map((_, i) => (
-                  <Heart
-                    key={i}
-                    className={`w-5 h-5 transition-all ${
-                      i < Math.min(g.hearts, 5)
-                        ? "text-red-400 fill-red-400 drop-shadow-sm"
-                        : "text-rose-100 fill-rose-100"
-                    }`}
-                  />
-                ))}
+                {Array.from({ length: 5 }).map((_, i) => {
+                  const eff = Math.min(g.hearts - (g.halfHeartOwed ? 0.5 : 0), 5);
+                  const isFull = i < Math.floor(eff);
+                  const isHalf = !isFull && i === Math.floor(eff) && eff % 1 === 0.5;
+                  if (isHalf) return (
+                    <span key={i} className="relative inline-flex w-5 h-5 flex-shrink-0">
+                      <Heart className="absolute w-5 h-5 text-rose-100 fill-rose-100" />
+                      <Heart className="absolute w-5 h-5 text-red-400 fill-red-400 drop-shadow-sm" style={{ clipPath: "inset(0 50% 0 0)" }} />
+                    </span>
+                  );
+                  return (
+                    <Heart key={i} className={`w-5 h-5 transition-all ${isFull ? "text-red-400 fill-red-400 drop-shadow-sm" : "text-rose-100 fill-rose-100"}`} />
+                  );
+                })}
               </div>
               <div className="flex items-center justify-between">
                 <p className="text-sm font-bold text-rose-700">
@@ -611,7 +650,7 @@ export default function ProgressSidebar({
                   <div className="mt-2 flex items-center justify-between">
                     <span className="text-[10px] text-slate-500 flex items-center gap-1">
                       <Clock3 className="w-3 h-3" />
-                      {skill.progress > 0 ? "Active this session" : "Not practiced yet"}
+                      {skill.progress >= 80 ? "Mastered" : skill.progress > 0 ? "In progress" : "Not started"}
                     </span>
                     <button
                       onClick={() => { onPracticeSkill(skill.key); onClose(); }}
@@ -628,17 +667,22 @@ export default function ProgressSidebar({
               <p className="text-xs font-semibold text-slate-700 mb-2">Focus Suggestions</p>
               <div className="flex flex-wrap gap-1.5">
                 {(() => {
-                  const weakest  = [...g.skills].sort((a, b) => a.progress - b.progress)[0];
-                  const strongest = [...g.skills].sort((a, b) => b.progress - a.progress)[0];
+                  const practiced = g.skills.filter((s) => s.progress > 0);
+                  const weakest   = practiced.length > 0 ? [...practiced].sort((a, b) => a.progress - b.progress)[0] : null;
+                  const strongest = practiced.length > 0 ? [...practiced].sort((a, b) => b.progress - a.progress)[0] : null;
                   return (
                     <>
-                      {weakest && (
+                      {weakest ? (
                         <button
                           onClick={() => { onPracticeSkill(weakest.key); onClose(); }}
                           className="text-[11px] px-2 py-1 rounded-full bg-rose-50 text-rose-700 border border-rose-100 hover:bg-rose-100 transition-colors"
                         >
-                          Weak: {weakest.label} ({weakest.progress}%)
+                          Reinforce: {weakest.label} ({weakest.progress}%)
                         </button>
+                      ) : (
+                        <span className="text-[11px] px-2 py-1 rounded-full bg-slate-100 text-slate-500 border border-slate-200">
+                          Start chatting to unlock suggestions
+                        </span>
                       )}
                       {g.streakCount > 0 && (
                         <span className="text-[11px] px-2 py-1 rounded-full bg-amber-50 text-amber-700 border border-amber-100 flex items-center gap-1">

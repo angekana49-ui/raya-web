@@ -19,10 +19,10 @@ export default function PromoCodeModal({ isOpen, onClose }: PromoCodeModalProps)
     if (!code.trim()) return;
 
     setIsLoading(true);
-    // Simulation de validation du code
+    // Simulate promo code validation.
     await new Promise((resolve) => setTimeout(resolve, 1000));
 
-    // Pour la démo, on accepte le code "RAYA2024"
+    // Demo only: accept code "RAYA2024".
     if (code.toUpperCase() === "RAYA2024") {
       setStatus("success");
     } else {
@@ -41,7 +41,6 @@ export default function PromoCodeModal({ isOpen, onClose }: PromoCodeModalProps)
     <AnimatePresence>
       {isOpen && (
         <>
-          {/* Backdrop */}
           <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
@@ -50,7 +49,6 @@ export default function PromoCodeModal({ isOpen, onClose }: PromoCodeModalProps)
             onClick={handleClose}
           />
 
-          {/* Modal */}
           <motion.div
             initial={{ opacity: 0, scale: 0.95 }}
             animate={{ opacity: 1, scale: 1 }}
@@ -62,7 +60,6 @@ export default function PromoCodeModal({ isOpen, onClose }: PromoCodeModalProps)
               className="bg-white rounded-2xl shadow-xl w-full max-w-md overflow-hidden"
               onClick={(e) => e.stopPropagation()}
             >
-              {/* Header */}
               <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100">
                 <div className="flex items-center gap-3">
                   <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center">
@@ -78,34 +75,39 @@ export default function PromoCodeModal({ isOpen, onClose }: PromoCodeModalProps)
                 </button>
               </div>
 
-              {/* Content */}
               <div className="p-5">
-                {/* Info box */}
                 <div className="bg-blue-50 rounded-xl p-4 mb-5">
                   <p className="text-sm text-blue-800 leading-relaxed">
                     <span className="font-semibold">Promo code benefits:</span>
                   </p>
                   <ul className="mt-2 space-y-1.5 text-sm text-blue-700">
                     <li className="flex items-start gap-2">
-                      <span className="text-blue-500 mt-0.5">•</span>
-                      <span><strong>Annual subscription:</strong> 1 month free</span>
+                      <span className="text-blue-500 mt-0.5">-</span>
+                      <span>
+                        <strong>Annual subscription:</strong> 1 month free
+                      </span>
                     </li>
                     <li className="flex items-start gap-2">
-                      <span className="text-blue-500 mt-0.5">•</span>
-                      <span><strong>Monthly subscription:</strong> 1 week free</span>
+                      <span className="text-blue-500 mt-0.5">-</span>
+                      <span>
+                        <strong>Monthly subscription:</strong> 1 week free
+                      </span>
                     </li>
                     <li className="flex items-start gap-2">
-                      <span className="text-blue-500 mt-0.5">•</span>
-                      <span><strong>Free plan:</strong> 2 weeks free</span>
+                      <span className="text-blue-500 mt-0.5">-</span>
+                      <span>
+                        <strong>Free plan:</strong> 2 weeks free
+                      </span>
                     </li>
                     <li className="flex items-start gap-2">
-                      <span className="text-blue-500 mt-0.5">•</span>
-                      <span><strong>For everyone:</strong> 15% off first subscription</span>
+                      <span className="text-blue-500 mt-0.5">-</span>
+                      <span>
+                        <strong>For everyone:</strong> 15% off first subscription
+                      </span>
                     </li>
                   </ul>
                 </div>
 
-                {/* Form */}
                 <form onSubmit={handleSubmit}>
                   <div className="mb-4">
                     <label htmlFor="promo-code" className="block text-sm font-medium text-gray-700 mb-2">
@@ -119,13 +121,12 @@ export default function PromoCodeModal({ isOpen, onClose }: PromoCodeModalProps)
                         setCode(e.target.value.toUpperCase());
                         setStatus("idle");
                       }}
-                      placeholder="E.g.: RAYA2024" // Note: placeholder is not translated by Google Translate
+                      placeholder="E.g.: RAYA2024" // Keep fixed to avoid auto-translation drift.
                       className="w-full px-4 py-3 border border-gray-200 rounded-xl text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-colors"
                       disabled={isLoading || status === "success"}
                     />
                   </div>
 
-                  {/* Status messages */}
                   <AnimatePresence mode="wait">
                     {status === "success" && (
                       <motion.div
@@ -156,7 +157,6 @@ export default function PromoCodeModal({ isOpen, onClose }: PromoCodeModalProps)
                     )}
                   </AnimatePresence>
 
-                  {/* Submit button */}
                   <button
                     type="submit"
                     disabled={!code.trim() || isLoading || status === "success"}

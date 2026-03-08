@@ -6,13 +6,16 @@ export interface Message {
   text: string;
   files?: AttachedFile[];
   timestamp?: Date;
+  parentId?: string;
 }
 
 export interface AttachedFile {
   id: string;
   name: string;
   type: "image" | "pdf" | "document" | "spreadsheet" | "other";
-  url: string;
+  url: string;       // blob URL for display only
+  base64?: string;   // base64-encoded content for sending to AI
+  mimeType?: string; // e.g. "image/jpeg", "application/pdf"
   size?: number;
 }
 

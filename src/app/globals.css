@@ -1,11 +1,11 @@
 @import "tailwindcss";
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
-  --primary: #667eea;
-  --primary-dark: #764ba2;
-  --primary-light: #eff6ff;
+  --background: #f5f7ff;
+  --foreground: #111b3b;
+  --primary: #5a6cff;
+  --primary-dark: #6947ff;
+  --primary-light: #eef1ff;
 }
 
 @theme inline {
@@ -14,20 +14,47 @@
   --color-primary: var(--primary);
   --color-primary-dark: var(--primary-dark);
   --color-primary-light: var(--primary-light);
-  --font-sans: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+  --font-sans: "Space Grotesk", "Manrope", "Avenir Next", "Segoe UI", sans-serif;
 }
 
 body {
-  background: var(--background);
+  background:
+    radial-gradient(circle at 12% 18%, rgba(90, 108, 255, 0.17), transparent 36%),
+    radial-gradient(circle at 86% 12%, rgba(125, 89, 255, 0.16), transparent 34%),
+    linear-gradient(180deg, #ffffff 0%, var(--background) 46%, #eef2ff 100%);
+  background-size: 140% 140%, 140% 140%, 100% 100%;
+  animation: auraShift 18s ease-in-out infinite alternate;
   color: var(--foreground);
-  font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-family: "Space Grotesk", "Manrope", "Avenir Next", "Segoe UI", sans-serif;
+}
+
+@keyframes auraShift {
+  0% {
+    background-position: 0% 0%, 100% 0%, 0% 0%;
+  }
+  100% {
+    background-position: 18% 14%, 82% 12%, 0% 0%;
+  }
+}
+
+/* Chat message font — DM Sans (close to Google Sans used by Gemini) */
+.chat-text {
+  font-family: "DM Sans", "Google Sans", system-ui, sans-serif;
+  letter-spacing: -0.01em;
+  line-height: 1.65;
+}
+
+/*
+ * Prevent Google Translate from hiding message bubbles.
+ * GT marks elements with translate="no" / class="notranslate" as .skiptranslate
+ * and can set display:none via its own CSS or inline styles.
+ * High-specificity + !important wins over GT's stylesheet rules.
+ * The MutationObserver in GoogleTranslateScript handles inline style overrides.
+ */
+[translate="no"].msg-body,
+.notranslate.msg-body {
+  display: block !important;
+  visibility: visible !important;
 }
 
 /* Scrollbar styling */

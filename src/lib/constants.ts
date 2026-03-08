@@ -1,13 +1,13 @@
-// Design System RAYA Web - Basé sur Bluestift
+// RAYA Web Design System - Based on Bluestift
 
 export const COLORS = {
-  // Palette principale
+  // Primary palette
   primary: "#667eea",
   primaryDark: "#764ba2",
   primaryLight: "#eff6ff",
   primaryHover: "#5a6fd6",
 
-  // Accents fonctionnels
+  // Functional accents
   secondary: "#2563eb",
   success: "#10b981",
   successDark: "#059669",
@@ -57,10 +57,10 @@ export const GRADIENTS = {
 
 export const RAYA_CONFIG = {
   name: "RAYA",
-  tagline: "Ton assistant IA personnel",
-  systemPrompt: `Tu es RAYA, l'assistant IA de Bluestift.
-Tu aides les utilisateurs à apprendre, créer du contenu éducatif, et progresser.
-Sois encourageant, pédagogue, et précis. Adapte ton langage au niveau de l'utilisateur.`,
+  tagline: "Your personal AI assistant",
+  systemPrompt: `You are RAYA, Bluestift's AI assistant.
+You help users learn, create educational content, and improve continuously.
+Be encouraging, pedagogical, and precise. Adapt your language to the user's level.`,
   maxTokens: 2048,
   temperature: 0.7,
 } as const;

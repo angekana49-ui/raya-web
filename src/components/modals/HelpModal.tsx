@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   X,
@@ -13,6 +14,8 @@ import {
   Mail,
   Phone,
   ExternalLink,
+  ChevronDown,
+  ChevronUp,
 } from "lucide-react";
 import { NoTranslate } from "@/components/ui/NoTranslate";
 
@@ -88,6 +91,12 @@ const faqItems: FAQItem[] = [
 ];
 
 export default function HelpModal({ isOpen, onClose }: HelpModalProps) {
+  const [openFaqIndex, setOpenFaqIndex] = useState<number | null>(0);
+
+  const handleToggleFaq = (index: number) => {
+    setOpenFaqIndex((prev) => (prev === index ? null : index));
+  };
+
   return (
     <AnimatePresence>
       {isOpen && (
@@ -137,21 +146,45 @@ export default function HelpModal({ isOpen, onClose }: HelpModalProps) {
                 {faqItems.map((item, index) => (
                   <div
                     key={index}
-                    className="bg-gray-50 rounded-xl p-4 space-y-3"
+                    className="bg-gray-50 rounded-xl border border-gray-100 overflow-hidden"
                   >
-                    <div className="flex items-start gap-3">
+                    <button
+                      type="button"
+                      onClick={() => handleToggleFaq(index)}
+                      className="w-full flex items-start gap-3 px-4 py-3.5 text-left hover:bg-gray-100/70 transition-colors"
+                    >
                       <div className="flex-shrink-0 mt-0.5">{item.icon}</div>
-                      <h3 className="text-sm font-bold text-gray-900 leading-tight">
+                      <h3 className="flex-1 text-sm font-bold text-gray-900 leading-tight">
                         {item.question}
                       </h3>
-                    </div>
-                    <div className="pl-8 space-y-2">
-                      {item.answer.map((paragraph, pIndex) => (
-                        <p key={pIndex} className="text-sm text-gray-600 leading-relaxed">
-                          {paragraph}
-                        </p>
-                      ))}
-                    </div>
+                      <div className="flex-shrink-0 text-gray-500 mt-0.5">
+                        {openFaqIndex === index ? (
+                          <ChevronUp className="w-4 h-4" />
+                        ) : (
+                          <ChevronDown className="w-4 h-4" />
+                        )}
+                      </div>
+                    </button>
+
+                    <AnimatePresence initial={false}>
+                      {openFaqIndex === index && (
+                        <motion.div
+                          initial={{ height: 0, opacity: 0 }}
+                          animate={{ height: "auto", opacity: 1 }}
+                          exit={{ height: 0, opacity: 0 }}
+                          transition={{ duration: 0.2 }}
+                          className="overflow-hidden"
+                        >
+                          <div className="pl-11 pr-4 pb-4 space-y-2">
+                            {item.answer.map((paragraph, pIndex) => (
+                              <p key={pIndex} className="text-sm text-gray-600 leading-relaxed">
+                                {paragraph}
+                              </p>
+                            ))}
+                          </div>
+                        </motion.div>
+                      )}
+                    </AnimatePresence>
                   </div>
                 ))}
 

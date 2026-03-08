@@ -1,11 +1,11 @@
-// Configuration des modèles IA pour RAYA Web
+// AI model configuration for RAYA Web
 
 import type { AIModel, ChatMode } from "@/types";
 
 export const AI_MODELS: AIModel[] = [
   {
-    id: "gemini-3",
-    name: "Gemini 3",
+    id: "gemini-3.1-flash-lite-preview",
+    name: "Gemini 3.1",
     provider: "google",
     description: "Fast and efficient default model",
     features: ["Text", "Images", "Documents", "Code"],
@@ -54,7 +54,8 @@ export const CHAT_MODES: ChatMode[] = [
     name: "Deep Thinking",
     description: "Detailed analysis and complete response",
     icon: "brain",
-    systemPrompt: "You are an expert educational assistant. Provide detailed, structured and complete explanations.",
+    systemPrompt:
+      "You are an expert educational assistant. Provide detailed, structured and complete explanations.",
     temperature: 0.3,
     maxTokens: 4000,
   },
@@ -79,7 +80,7 @@ export const CHAT_MODES: ChatMode[] = [
 ];
 
 export const DEFAULT_CONFIG = {
-  model: "gemini-3",
+  model: "gemini-3.1-flash-lite-preview",
   mode: "normal",
   temperature: 0.5,
   maxTokens: 2000,

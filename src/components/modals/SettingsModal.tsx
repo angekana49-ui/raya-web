@@ -30,7 +30,7 @@ export default function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
   const [notificationsEnabled, setNotificationsEnabled] = useState(true);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
-  // Données simulées pour la mémoire
+  // Mock storage data
   const memoryUsage = {
     used: 12.4, // MB
     total: 50, // MB
@@ -39,11 +39,11 @@ export default function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
 
   const handleThemeChange = (newTheme: Theme) => {
     setTheme(newTheme);
-    // TODO: Implémenter le changement de thème réel
+    // TODO: Implement actual theme switching
   };
 
   const handleDeleteAccount = () => {
-    // TODO: Implémenter la suppression de compte via API
+    // TODO: Implement account deletion via API
     alert("Your deletion request has been sent. You will receive a confirmation email.");
     setShowDeleteConfirm(false);
     onClose();
@@ -87,7 +87,7 @@ export default function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
 
               {/* Content */}
               <div className="flex-1 overflow-y-auto p-5 space-y-6">
-                {/* Thème */}
+                {/* Theme */}
                 <div>
                   <h3 className="text-sm font-semibold text-gray-900 mb-3 flex items-center gap-2">
                     <Sun className="w-4 h-4 text-gray-600" />
@@ -177,7 +177,7 @@ export default function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                   <p className="text-xs text-gray-400 mt-2">Coming soon</p>
                 </div>
 
-                {/* Mémoire */}
+                {/* Storage */}
                 <div>
                   <h3 className="text-sm font-semibold text-gray-900 mb-3 flex items-center gap-2">
                     <Database className="w-4 h-4 text-gray-600" />
@@ -220,7 +220,7 @@ export default function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                   <p className="text-xs text-gray-400 mt-2">Coming soon</p>
                 </div>
 
-                {/* Confidentialité */}
+                {/* Privacy */}
                 <div>
                   <h3 className="text-sm font-semibold text-gray-900 mb-3 flex items-center gap-2">
                     <Shield className="w-4 h-4 text-gray-600" />

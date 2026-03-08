@@ -8,6 +8,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { RayaAIService, ProgressionState, AIProvider } from '@/services/raya-ai.service';
+import { resolveUserId } from '@/lib/auth';
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -51,6 +52,11 @@ const getRayaInstance = () => {
 };
 
 export async function POST(req: NextRequest) {
+  const userId = await resolveUserId(req);
+  if (!userId) {
+    return NextResponse.json({ error: 'Unauthorized usage' }, { status: 401 });
+  }
+
   const tempFilePath: string | null = null;
 
   try {
@@ -74,6 +80,13 @@ export async function POST(req: NextRequest) {
       return NextResponse.json(
         { error: 'Image is required for this endpoint' },
         { status: 400 }
+      );
+    }
+
+    if (image.size > 5 * 1024 * 1024) {
+      return NextResponse.json(
+        { error: 'Image is too large (max 5MB)' },
+        { status: 413 }
       );
     }
 
@@ -152,7 +165,7 @@ export async function OPTIONS() {
     headers: {
       'Access-Control-Allow-Origin': '*',
       'Access-Control-Allow-Methods': 'POST, OPTIONS',
-      'Access-Control-Allow-Headers': 'Content-Type',
+      'Access-Control-Allow-Headers': 'Content-Type, Authorization',
     },
   });
 }

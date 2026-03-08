@@ -4,13 +4,13 @@
  * Exponential curve: each tier is ~2-3× the previous.
  * At ~250-350 XP/active day:
  *   Apprentice (500 XP)    → 2 days
- *   Scholar    (2 500 XP)  → 1 week
- *   Sage       (7 500 XP)  → 3 weeks
- *   Expert     (19 500 XP) → 2 months
- *   Genius     (44 500 XP) → 1 full school term
+ *   Scholar    (3 000 XP)  → ~10 days
+ *   Sage       (10 000 XP) → ~1 month
+ *   Expert     (25 000 XP) → ~3 months
+ *   Genius     (50 000 XP) → ~5-6 months (nearly a full school year)
  */
 
-export const XP_LEVELS = [0, 500, 2_500, 7_500, 19_500, 44_500] as const;
+export const XP_LEVELS = [0, 500, 3_000, 10_000, 25_000, 50_000] as const;
 
 export const LEVEL_TITLES = [
   "Student",     // 0

@@ -58,7 +58,7 @@ export default function ModelPickerMenu({
               </button>
             </div>
 
-            {/* Pro message - bientôt disponible */}
+            {/* Pro message - coming soon */}
             <div className="mx-3 mt-3 p-3 bg-gray-100 border border-gray-200 rounded-xl opacity-60">
               <div className="flex items-start gap-2">
                 <Crown className="w-5 h-5 text-gray-400 flex-shrink-0 mt-0.5" />
