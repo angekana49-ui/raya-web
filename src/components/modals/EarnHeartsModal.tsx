@@ -4,6 +4,8 @@ import { motion, AnimatePresence } from "framer-motion";
 import { Heart, X, Target, Medal, Link2, Tv2 } from "lucide-react";
 import type { BadgeItem } from "@/hooks/useGamification";
 
+import { NoTranslate } from "@/components/ui/NoTranslate";
+
 // ─── Props ────────────────────────────────────────────────────────────────────
 
 interface EarnHeartsModalProps {
@@ -83,7 +85,7 @@ export default function EarnHeartsModal({
                 <p className="text-[11px] font-semibold text-rose-600">{peakLabel}</p>
                 <p className="text-[10px] text-rose-400">1 heart = {isOffPeak ? "2 msgs" : "1 msg"}</p>
                 {regenCountdown && (
-                  <p className="text-[10px] text-rose-400 mt-0.5">+1♥ in {regenCountdown}</p>
+                  <p className="text-[10px] text-rose-400 mt-0.5">+1♥ in <NoTranslate>{regenCountdown}</NoTranslate></p>
                 )}
               </div>
             </div>

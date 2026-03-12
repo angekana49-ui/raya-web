@@ -1,8 +1,0 @@
-# robots.txt for RAYA AI Assistant
-# https://raya.thebluestift.com
-
-User-agent: *
-Allow: /
-
-# Sitemap
-Sitemap: https://raya.thebluestift.com/sitemap.xml

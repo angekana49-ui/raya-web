@@ -1062,7 +1062,7 @@ export default function Home() {
               <div className="flex items-center gap-2 rounded-xl bg-red-50 border border-red-100 px-3 py-2">
                 <Heart className="w-4 h-4 text-red-400 fill-red-400 shrink-0 animate-pulse" />
                 <span className="text-xs text-red-600 flex-1">
-                  No hearts left!{regenCountdown ? ` Next heart in ${regenCountdown}.` : ""}
+                  No hearts left!{regenCountdown ? <> Next heart in <NoTranslate>{regenCountdown}</NoTranslate>.</> : ""}
                 </span>
                 <button
                   onClick={() => setEarnHeartsVisible(true)}

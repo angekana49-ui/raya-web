@@ -71,7 +71,7 @@ const DailyCountdown = memo(function DailyCountdown({ active }: { active: boolea
   return (
     <p className="text-[10px] text-amber-500 flex items-center gap-1 mb-2">
       <Clock3 className="w-3 h-3" />
-      Expires in {label}
+      Expires in <NoTranslate>{label}</NoTranslate>
     </p>
   );
 });
@@ -304,9 +304,9 @@ export default function ProgressSidebar({
               </div>
               <p className="text-[10px] text-rose-500 mt-1">
                 {netMessages === 0
-                  ? regenCountdown ? `Next heart in ${regenCountdown}` : "Earn hearts to keep chatting"
+                  ? regenCountdown ? <>Next heart in <NoTranslate>{regenCountdown}</NoTranslate></> : "Earn hearts to keep chatting"
                   : regenCountdown
-                  ? `+1 heart in ${regenCountdown}`
+                  ? <>+1 heart in <NoTranslate>{regenCountdown}</NoTranslate></>
                   : "Full — auto regen every 12 min"}
               </p>
             </div>
