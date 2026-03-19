@@ -35,8 +35,6 @@ export default function EarnHeartsModal({
   onEarnHearts,
   onOpenMissions,
 }: EarnHeartsModalProps) {
-  const isOffPeak = peakLabel.includes("×2");
-
   return (
     <AnimatePresence>
       {visible && (
@@ -83,7 +81,7 @@ export default function EarnHeartsModal({
               </div>
               <div className="text-right">
                 <p className="text-[11px] font-semibold text-rose-600">{peakLabel}</p>
-                <p className="text-[10px] text-rose-400">1 heart = {isOffPeak ? "2 msgs" : "1 msg"}</p>
+                <p className="text-[10px] text-rose-400">1 heart = 2 msgs</p>
                 {regenCountdown && (
                   <p className="text-[10px] text-rose-400 mt-0.5">+1♥ in <NoTranslate>{regenCountdown}</NoTranslate></p>
                 )}

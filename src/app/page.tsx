@@ -212,11 +212,7 @@ export default function Home() {
   const { state: g, hasUnsavedProgress } = gamification;
   const REGEN_CAP_DISPLAY = 5;
   const netMessages = getNetMessages(g.hearts, g.halfHeartOwed ?? false);
-
-  const isPeakLabel = () => {
-    const h = new Date().getHours();
-    return (h >= 8 && h < 10) || (h >= 17 && h < 21) ? "Peak hours · ×1" : "Off-peak · ×2";
-  };
+  const heartPolicyLabel = "10 messages · 24/7";
 
 
   // Live regen countdown — only starts interval when a heart is actually regenerating
@@ -799,7 +795,7 @@ export default function Home() {
   };
 
   const showHeader = activeMessages.length === 0;
-  const peakLabel = isPeakLabel();
+  const peakLabel = heartPolicyLabel;
 
   // ── Render ──────────────────────────────────────────────────────────────────
 
@@ -909,8 +905,8 @@ export default function Home() {
             title={regenCountdown ? `Next heart in ${regenCountdown}` : "Hearts — tap to earn more"}
           >
             <div className="flex items-center gap-0.5">
-              {Array.from({ length: 5 }).map((_, i) => {
-                const eff = Math.min(g.hearts - (g.halfHeartOwed ? 0.5 : 0), 5);
+              {Array.from({ length: REGEN_CAP_DISPLAY }).map((_, i) => {
+                const eff = Math.min(g.hearts - (g.halfHeartOwed ? 0.5 : 0), REGEN_CAP_DISPLAY);
                 const isFull = i < Math.floor(eff);
                 const isHalf = !isFull && i === Math.floor(eff) && eff % 1 === 0.5;
                 const pulse = netMessages === 0 ? "animate-pulse" : "";

@@ -218,13 +218,8 @@ const REGEN_INTERVAL_MS = 12 * 60 * 1000;
 const REGEN_CAP  = 5;
 const ACCUM_CAP  = 50;
 
-function isPeakHour(): boolean {
-  const h = new Date().getHours();
-  return (h >= 8 && h < 10) || (h >= 17 && h < 21);
-}
-
 export function getNetMessages(hearts: number, halfHeartOwed: boolean): number {
-  return isPeakHour() ? hearts : hearts * 2 - (halfHeartOwed ? 1 : 0);
+  return hearts * 2 - (halfHeartOwed ? 1 : 0);
 }
 
 // ─── Time helpers ──────────────────────────────────────────────────────────────
@@ -514,22 +509,13 @@ export function useGamification(userId?: string) {
   // ── Consume a heart ──
   const consumeHeart = useCallback(() => {
     setState((prev) => {
-      const peak = isPeakHour();
-      if (peak) {
+      if (prev.halfHeartOwed) {
         if (prev.hearts <= 0) return prev;
         const now = Date.now();
         const nextRegen = prev.hearts === REGEN_CAP ? now + REGEN_INTERVAL_MS : prev.nextHeartRegenAt;
-        return { ...prev, hearts: prev.hearts - 1, nextHeartRegenAt: nextRegen };
-      } else {
-        if (prev.halfHeartOwed) {
-          if (prev.hearts <= 0) return prev;
-          const now = Date.now();
-          const nextRegen = prev.hearts === REGEN_CAP ? now + REGEN_INTERVAL_MS : prev.nextHeartRegenAt;
-          return { ...prev, hearts: prev.hearts - 1, halfHeartOwed: false, nextHeartRegenAt: nextRegen };
-        } else {
-          return { ...prev, halfHeartOwed: true };
-        }
+        return { ...prev, hearts: prev.hearts - 1, halfHeartOwed: false, nextHeartRegenAt: nextRegen };
       }
+      return { ...prev, halfHeartOwed: true };
     });
   }, []);
 

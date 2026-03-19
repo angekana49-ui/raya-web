@@ -307,7 +307,7 @@ export default function ProgressSidebar({
                   ? regenCountdown ? <>Next heart in <NoTranslate>{regenCountdown}</NoTranslate></> : "Earn hearts to keep chatting"
                   : regenCountdown
                   ? <>+1 heart in <NoTranslate>{regenCountdown}</NoTranslate></>
-                  : "Full — auto regen every 12 min"}
+                  : "Full — auto regen every 12 min up to 5"}
               </p>
             </div>
 
