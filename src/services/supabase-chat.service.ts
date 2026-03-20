@@ -1,4 +1,5 @@
 import { supabaseAdmin } from '@/lib/supabase/server'
+import type { SessionSummaryPayload } from '@/lib/session-aggregator'
 
 // ---------- CONVERSATIONS ----------
 
@@ -124,9 +125,36 @@ export async function saveMessage(
 
 // ---------- EDGE FUNCTION ----------
 
-export async function callAnalyzeSession(conversationId: string) {
+export async function callAnalyzeSession(
+  conversationId: string,
+  userId: string,
+  sessionSummary?: SessionSummaryPayload | null
+) {
+  let body: Record<string, unknown> = { conversation_id: conversationId }
+
+  if (sessionSummary) {
+    const { data: enrollment, error: enrollmentError } = await supabaseAdmin
+      .from('users')
+      .select('class_year_id, school_id')
+      .eq('id', userId)
+      .single()
+
+    if (enrollmentError) throw enrollmentError
+
+    if (enrollment?.class_year_id && enrollment?.school_id) {
+      body = {
+        conversation_id: conversationId,
+        session_summary: {
+          ...sessionSummary,
+          class_year_id: enrollment.class_year_id,
+          school_id: enrollment.school_id,
+        },
+      }
+    }
+  }
+
   const { data, error } = await supabaseAdmin.functions.invoke('analyze-session', {
-    body: { conversation_id: conversationId },
+    body,
   })
 
   if (error) throw error

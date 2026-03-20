@@ -69,6 +69,12 @@ export interface AnalyticsPoint {
   question_quality: "low" | "medium" | "high" | null;
   intervention_needed: boolean;
   recommendation_for_teacher: string | null;
+  // MOAT signals (deterministic, no AI call)
+  cognitive_depth: 'surface' | 'procedural' | 'deep';
+  prerequisite_gap_depth: number | null;  // 0 = on-level, -2 = 2 levels below
+  resilience_score: number | null;        // computed by session aggregator (per-exchange = null)
+  curriculum_ref: string | null;          // standards reference (CCSS, BAC, etc.)
+  is_off_curriculum: boolean;             // student exploring beyond syllabus
 }
 
 // ─── Skill Catalog (exported for useGamification) ─────────────────────────────
@@ -220,6 +226,57 @@ export function analyzeUserMessage(text: string): MessageAnalysis {
   const complexityScore = Math.min(1, words / 40);
 
   return { subject, questionType, complexityScore };
+}
+
+// ─── MOAT Signal Detectors (pure, deterministic, no AI) ───────────────────────
+
+/**
+ * Classify the cognitive depth of a student's question.
+ * - surface: recall / "what is X?" / "give me the formula"
+ * - procedural: "how to solve", "steps to", "calculate"
+ * - deep: "why", "how come", reasoning about underlying logic
+ */
+export function detectCognitiveDepth(text: string): 'surface' | 'procedural' | 'deep' {
+  // Deep: reasoning, causality, logic-seeking
+  if (/pourquoi|why|how come|logique|reasoning|explain\s*(why|how)|comment\s*(se fait|fonctionne|est[- ]ce possible|ça marche)|what.*underlying|but why|raison/i.test(text)) {
+    return 'deep';
+  }
+  // Procedural: step-by-step, solving, computation
+  if (/how (to|do|can)|solve|calculer|étapes|steps|résoudre|compute|trouver|démontrer|prove|find the|méthode|procedure/i.test(text)) {
+    return 'procedural';
+  }
+  // Surface: recall, definitions, formulas
+  return 'surface';
+}
+
+/**
+ * Detect if a student's question is off-curriculum (curiosity-driven).
+ * Checks for topics that are typically beyond standard K-12 syllabi.
+ */
+export function detectOffCurriculum(text: string): boolean {
+  return /\b(intelligence artificielle|artificial intelligence|machine learning|blockchain|quantum|crypto|entrepreneurship|startup|space\s*x|nasa|black hole|trou noir|dark matter|matière noire|stock market|bourse|trading|app development|game design|ethical hacking|cybersecurity|neuroscience|astrophysique|robotics|3d print|réalité virtuelle|virtual reality|data science)\b/i.test(text);
+}
+
+/**
+ * Parse a prerequisite_gap_level string into a numeric depth.
+ * e.g. "4ème" when student is in "Terminale" → -8 levels gap.
+ * Returns null if no gap detected, 0 if on-level, negative for gap depth.
+ */
+export function parseGapDepth(gapLevel: string | undefined, currentLevel?: string): number | null {
+  if (!gapLevel) return null;
+  // Simple ordinal mapping for French system (extendable for US/UK)
+  const frenchLevels: Record<string, number> = {
+    'cp': 1, 'ce1': 2, 'ce2': 3, 'cm1': 4, 'cm2': 5,
+    '6ème': 6, '6eme': 6, '5ème': 7, '5eme': 7,
+    '4ème': 8, '4eme': 8, '3ème': 9, '3eme': 9,
+    '2nde': 10, 'seconde': 10, '1ère': 11, 'premiere': 11,
+    'terminale': 12, 'tle': 12,
+  };
+  const gapNum = frenchLevels[gapLevel.toLowerCase().trim()];
+  const currentNum = currentLevel ? frenchLevels[currentLevel.toLowerCase().trim()] : null;
+  if (gapNum == null) return null;
+  if (currentNum == null) return -1;  // gap detected but can't measure depth
+  return gapNum - currentNum;  // negative = gap is below current level
 }
 
 // ─── Step 2: Evaluate full exchange ───────────────────────────────────────────
@@ -382,6 +439,12 @@ export function evaluateExchange(
       v3?.teacher_note != null
         ? v3.teacher_note
         : (legacy?.recommendations?.for_teacher ?? null),
+    // MOAT signals
+    cognitive_depth: isAcademic ? (v3?.cognitive_depth ?? detectCognitiveDepth(analysis.questionType === 'other' ? '' : analysis.questionType)) : 'surface',
+    prerequisite_gap_depth: v3?.prerequisite_gap_level ? parseGapDepth(v3.prerequisite_gap_level) : null,
+    resilience_score: null,  // computed by session-aggregator across multiple exchanges
+    curriculum_ref: v3?.curriculum_ref ?? null,
+    is_off_curriculum: false,  // set by caller who has access to the raw user message
   };
 
   // Extract mission_grade if RAYA graded a mission response
@@ -425,4 +488,8 @@ interface V3Insight {
   teacher_note?: string;
   engagement?: number;
   mission_grade?: { score: number; max: number; feedback: string };
+  // MOAT signals (optional — populated when RAYA detects them)
+  prerequisite_gap_level?: string;
+  cognitive_depth?: 'surface' | 'procedural' | 'deep';
+  curriculum_ref?: string;
 }

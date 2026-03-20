@@ -43,6 +43,9 @@ import { supabase } from "@/lib/supabase/client";
 import { analyzeUserMessage, evaluateExchange } from "@/lib/assessment-engine";
 import type { MessageAnalysis } from "@/lib/assessment-engine";
 import { getLevelInfo } from "@/lib/level-titles";
+import { SessionAggregator } from "@/lib/session-aggregator";
+import type { SessionSummaryPayload } from "@/lib/session-aggregator";
+import type { RayaInsight } from "@/services/raya-ai.service";
 
 async function getAuthHeaders(): Promise<Record<string, string>> {
   const { data: { session } } = await supabase.auth.getSession();
@@ -157,8 +160,45 @@ export default function Home() {
   const autoScrollRef = useRef(true);
   const sessionTurnCount = useRef(0);
   const pendingAnalysis = useRef<MessageAnalysis | null>(null);
+  const sessionAggregatorRef = useRef<SessionAggregator | null>(null);
   // Conversation history for multi-turn memory (reset on new/switched conversation)
   const conversationHistoryRef = useRef<unknown[]>([]);
+
+  const getSessionAggregator = useCallback(() => {
+    if (!sessionAggregatorRef.current) {
+      sessionAggregatorRef.current = new SessionAggregator("", "");
+    }
+    return sessionAggregatorRef.current;
+  }, []);
+
+  const buildSessionSummary = useCallback((): SessionSummaryPayload | null => {
+    const aggregator = sessionAggregatorRef.current;
+    if (!aggregator) return null;
+    const summary = aggregator.finalizePayload();
+    return summary.exchange_count > 0 ? summary : null;
+  }, []);
+
+  const resetSessionAggregator = useCallback(() => {
+    sessionAggregatorRef.current = null;
+  }, []);
+
+  const endConversation = useCallback(async (conversationId: string) => {
+    const sessionSummary = buildSessionSummary();
+    resetSessionAggregator();
+
+    try {
+      const authHeaders = await getAuthHeaders();
+      await fetch(`/api/conversations/${conversationId}/end`, {
+        method: "POST",
+        headers: sessionSummary
+          ? { "Content-Type": "application/json", ...authHeaders }
+          : authHeaders,
+        ...(sessionSummary ? { body: JSON.stringify({ session_summary: sessionSummary }) } : {}),
+      });
+    } catch (error) {
+      console.error("Failed to end conversation:", error);
+    }
+  }, [buildSessionSummary, resetSessionAggregator]);
 
   const scrollToBottom = useCallback((behavior: ScrollBehavior = "auto") => {
     const el = chatScrollRef.current;
@@ -386,6 +426,13 @@ export default function Home() {
                 const insight = json.content?.insight ?? null;
                 const exchangeResult = evaluateExchange(insight, pendingAnalysis.current, sessionTurnCount.current);
                 gamOnExchangeEvaluated(exchangeResult);
+                const typedInsight = insight && typeof insight === "object" ? insight as Partial<RayaInsight> : null;
+                getSessionAggregator().addExchange(
+                  exchangeResult.analyticsPoint,
+                  messageForAi,
+                  typedInsight?.concept_id,
+                  typedInsight?.student_verdict === "correct"
+                );
                 pendingAnalysis.current = null;
               }
             } else if (json.type === "ids_resolved") {
@@ -482,7 +529,7 @@ export default function Home() {
         });
       }
     },
-    [activeConversationId, aiMode, selectedModel, gamOnExchangeEvaluated, gamification.state, profile]
+    [activeConversationId, aiMode, selectedModel, gamOnExchangeEvaluated, gamification.state, getSessionAggregator, profile]
   );
 
   const handleSend = () => {
@@ -519,6 +566,11 @@ export default function Home() {
   };
 
   const handleSelectConversation = async (id: string) => {
+    if (activeConversationId && activeConversationId !== id) {
+      void endConversation(activeConversationId);
+    } else {
+      resetSessionAggregator();
+    }
     conversationHistoryRef.current = [];
     setActiveConversationId(id);
     setActiveLeafId(null);
@@ -575,6 +627,7 @@ export default function Home() {
       await fetch(`/api/conversations/${id}`, { method: "DELETE", headers });
       setConversations((prev) => prev.filter((c) => c.id !== id));
       if (activeConversationId === id) {
+        resetSessionAggregator();
         setActiveConversationId(null);
         setAllMessages([]);
         setActiveLeafId(null);
@@ -606,9 +659,9 @@ export default function Home() {
 
   const handleNewChat = async () => {
     if (activeConversationId) {
-      getAuthHeaders().then(headers =>
-        fetch(`/api/conversations/${activeConversationId}/end`, { method: "POST", headers }).catch(console.error)
-      );
+      void endConversation(activeConversationId);
+    } else {
+      resetSessionAggregator();
     }
       conversationHistoryRef.current = [];
       setActiveConversationId(null);

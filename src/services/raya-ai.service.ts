@@ -59,6 +59,10 @@ export interface RayaInsight {
   difficulty: Difficulty;
   concept_id: string;
   pkm_delta: number;
+  // MOAT signals (optional — RAYA populates when detectable)
+  prerequisite_gap_level?: string;                        // e.g. "4ème" or "Grade 6" — detected prerequisite gap
+  cognitive_depth?: 'surface' | 'procedural' | 'deep';   // question depth classification
+  curriculum_ref?: string;                                // e.g. "CCSS.MATH.HSA.REI.B.4" or "BAC-MATH-PROB"
   mission_grade?: {
     score: number;
     max: 10 | 20;
