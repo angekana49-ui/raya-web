@@ -14,14 +14,15 @@ import { formatTime } from "@/lib/utils";
 // ─── Markdown + LaTeX component map ──────────────────────────────────────────
 const PROSE: Components = {
   // Headings
+  // Headings
   h1: ({ children }) => (
-    <h1 className="text-xl font-bold text-gray-900 mt-5 mb-2 first:mt-0 border-b border-slate-100 pb-1">{children}</h1>
+    <h1 className="text-2xl font-extrabold text-slate-900 mt-6 mb-3 first:mt-0 tracking-tight">{children}</h1>
   ),
   h2: ({ children }) => (
-    <h2 className="text-lg font-semibold text-gray-900 mt-4 mb-2 first:mt-0">{children}</h2>
+    <h2 className="text-xl font-bold text-slate-900 mt-5 mb-2.5 first:mt-0 tracking-tight">{children}</h2>
   ),
   h3: ({ children }) => (
-    <h3 className="text-base font-semibold text-gray-800 mt-3 mb-1 first:mt-0">{children}</h3>
+    <h3 className="text-lg font-bold text-slate-800 mt-4 mb-2 first:mt-0 tracking-tight">{children}</h3>
   ),
   // Paragraph
   p: ({ children }) => <p className="mb-2.5 last:mb-0 leading-[1.7]">{children}</p>,
@@ -103,35 +104,55 @@ interface MessageBubbleProps {
 
 function InfinityRailThinkingIcon() {
   return (
-    <svg
-      viewBox="0 0 120 60"
-      className="w-6 h-4 text-primary"
-      aria-hidden="true"
-    >
-      <path
-        id="thinking-infinity-path"
-        d="M 10 30
-           C 10 12, 38 12, 60 30
-           C 82 48, 110 48, 110 30
-           C 110 12, 82 12, 60 30
-           C 38 48, 10 48, 10 30"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="5"
-        strokeLinecap="round"
-        opacity="0.25"
-      />
-      <circle r="4" fill="currentColor">
-        <animateMotion dur="1.6s" repeatCount="indefinite" rotate="auto">
-          <mpath href="#thinking-infinity-path" />
-        </animateMotion>
-      </circle>
-      <circle r="2.5" fill="currentColor" opacity="0.6">
-        <animateMotion dur="1.6s" begin="0.8s" repeatCount="indefinite" rotate="auto">
-          <mpath href="#thinking-infinity-path" />
-        </animateMotion>
-      </circle>
-    </svg>
+    <div className="flex items-center gap-3 px-4 py-2 rounded-2xl bg-white/50 backdrop-blur-sm border border-white/20 shadow-sm transition-all animate-in fade-in slide-in-from-left-2">
+      <div className="relative">
+        <motion.div
+          animate={{
+            scale: [1, 1.2, 1],
+            opacity: [0.3, 0.6, 0.3],
+            background: [
+              "radial-gradient(circle, rgba(99,102,241,0.4) 0%, transparent 70%)",
+              "radial-gradient(circle, rgba(139,92,246,0.4) 0%, transparent 70%)",
+              "radial-gradient(circle, rgba(99,102,241,0.4) 0%, transparent 70%)"
+            ]
+          }}
+          transition={{ duration: 4, repeat: Infinity, ease: "easeInOut" }}
+          className="absolute -inset-2 blur-xl rounded-full"
+        />
+        <svg
+          viewBox="0 0 120 60"
+          className="w-8 h-5 text-indigo-600 relative z-10"
+          aria-hidden="true"
+        >
+          <path
+            id="thinking-infinity-path"
+            d="M 10 30
+               C 10 12, 38 12, 60 30
+               C 82 48, 110 48, 110 30
+               C 110 12, 82 12, 60 30
+               C 38 48, 10 48, 10 30"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="6"
+            strokeLinecap="round"
+            opacity="0.2"
+          />
+          <circle r="5" fill="currentColor">
+            <animateMotion dur="2s" repeatCount="indefinite" rotate="auto">
+              <mpath href="#thinking-infinity-path" />
+            </animateMotion>
+          </circle>
+          <circle r="3" fill="currentColor" opacity="0.6">
+            <animateMotion dur="2s" begin="1s" repeatCount="indefinite" rotate="auto">
+              <mpath href="#thinking-infinity-path" />
+            </animateMotion>
+          </circle>
+        </svg>
+      </div>
+      <span className="text-[11px] font-bold text-slate-400 uppercase tracking-widest animate-pulse">
+        Thinking...
+      </span>
+    </div>
   );
 }
 
@@ -178,8 +199,8 @@ function AttachedFileDisplay({
   );
 }
 
-export default function MessageBubble({ 
-  message, 
+export default function MessageBubble({
+  message,
   isStreaming = false,
   onEdit,
   siblingCount = 1,
@@ -235,7 +256,10 @@ export default function MessageBubble({
         transition={{ duration: 0.2 }}
         className="mb-5 ml-auto max-w-[85%] sm:max-w-[75%] md:max-w-[70%] lg:max-w-[620px] group relative"
       >
-        <div translate="no" className="notranslate msg-body px-4 py-3 rounded-[20px] bg-[linear-gradient(145deg,var(--primary),var(--primary-dark))] text-white rounded-br-md shadow-[0_8px_24px_rgba(90,108,255,0.25)]">
+        <div
+          translate="no"
+          className="notranslate msg-body px-5 py-3.5 rounded-[24px] bg-[linear-gradient(280deg,#6366f1,#8b5cf6,#818cf8,#6366f1)] bg-[length:400%_400%] animate-[gradientFlow_20s_ease_infinite] text-white rounded-br-md shadow-[0_12px_40px_-12px_rgba(99,102,241,0.2)] border border-white/20 ring-1 ring-white/10"
+        >
           {!isEditing && onEdit && (
             <button
               onClick={() => {
@@ -252,9 +276,9 @@ export default function MessageBubble({
           {message.files && message.files.length > 0 && (
             <div className="mb-2 -mx-1 px-1 overflow-x-auto">
               <div className="flex gap-2 min-w-max">
-              {message.files.map((file) => (
-                <AttachedFileDisplay key={file.id} file={file} onPreview={setPreviewFile} />
-              ))}
+                {message.files.map((file) => (
+                  <AttachedFileDisplay key={file.id} file={file} onPreview={setPreviewFile} />
+                ))}
               </div>
             </div>
           )}
@@ -421,12 +445,18 @@ export default function MessageBubble({
   // Assistant message: plain text while streaming, full Markdown + LaTeX once complete.
   return (
     <motion.div
-      initial={{ opacity: 0, y: 10 }}
+      initial={{ opacity: 0, y: 15 }}
       animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.2 }}
-      className="mb-5 w-full"
+      transition={{ duration: 0.35, ease: "easeOut" }}
+      className="mb-12 w-full group relative"
     >
-      <div translate="no" className="notranslate msg-body text-gray-900 max-w-[760px]">
+      {/* Gemini-style Subtle Aura - larger and fainter for the free-zone */}
+      <div className="absolute -inset-x-8 -inset-y-12 bg-gradient-to-r from-indigo-500/5 via-violet-500/5 to-blue-500/5 blur-[100px] rounded-full opacity-0 group-hover:opacity-100 transition-opacity duration-1000 pointer-events-none" />
+
+      <div
+        translate="no"
+        className="notranslate msg-body py-4 md:py-6 pr-4 md:pr-10 text-slate-800 max-w-[840px] leading-relaxed relative z-10"
+      >
         <div className="chat-text text-base">
           {isStreaming ? (
             // Fast plain-text during stream — no KaTeX/markdown parse overhead
@@ -443,30 +473,30 @@ export default function MessageBubble({
         </div>
 
         {siblingCount > 1 && (
-            <div className="flex items-center justify-start gap-1.5 sm:gap-2 mt-2 pt-1">
-              <span className="text-[10px] sm:text-[11px] text-slate-400 font-medium">
-                {siblingIndex + 1} / {siblingCount}
-              </span>
-              <div className="flex gap-1">
-                <button
-                  disabled={siblingIndex === 0}
-                  onClick={() => onNavigateBranch?.('prev')}
-                  className="p-1.5 sm:p-1 rounded hover:bg-slate-100 active:bg-slate-200 disabled:opacity-30 transition-colors"
-                  title="Previous branch"
-                >
-                  <ChevronLeft className="w-4 h-4 sm:w-3.5 sm:h-3.5 text-slate-400" />
-                </button>
-                <button
-                  disabled={siblingIndex === siblingCount - 1}
-                  onClick={() => onNavigateBranch?.('next')}
-                  className="p-1.5 sm:p-1 rounded hover:bg-slate-100 active:bg-slate-200 disabled:opacity-30 transition-colors"
-                  title="Next branch"
-                >
-                  <ChevronRight className="w-4 h-4 sm:w-3.5 sm:h-3.5 text-slate-400" />
-                </button>
-              </div>
+          <div className="flex items-center justify-start gap-1.5 sm:gap-2 mt-2 pt-1">
+            <span className="text-[10px] sm:text-[11px] text-slate-400 font-medium">
+              {siblingIndex + 1} / {siblingCount}
+            </span>
+            <div className="flex gap-1">
+              <button
+                disabled={siblingIndex === 0}
+                onClick={() => onNavigateBranch?.('prev')}
+                className="p-1.5 sm:p-1 rounded hover:bg-slate-100 active:bg-slate-200 disabled:opacity-30 transition-colors"
+                title="Previous branch"
+              >
+                <ChevronLeft className="w-4 h-4 sm:w-3.5 sm:h-3.5 text-slate-400" />
+              </button>
+              <button
+                disabled={siblingIndex === siblingCount - 1}
+                onClick={() => onNavigateBranch?.('next')}
+                className="p-1.5 sm:p-1 rounded hover:bg-slate-100 active:bg-slate-200 disabled:opacity-30 transition-colors"
+                title="Next branch"
+              >
+                <ChevronRight className="w-4 h-4 sm:w-3.5 sm:h-3.5 text-slate-400" />
+              </button>
             </div>
-          )}
+          </div>
+        )}
 
         {message.timestamp && (
           <p className="text-xs mt-2 text-gray-400">{formatTime(message.timestamp)}</p>
@@ -489,11 +519,11 @@ export function TypingIndicator() {
   }, []);
 
   return (
-    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="mb-3 w-full">
-      <div className="max-w-[760px] rounded-xl border border-slate-200/70 bg-white/80 px-3 py-2 shadow-sm">
-        <div className="flex items-center gap-2 text-sm text-slate-700">
+    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="mb-6 w-full">
+      <div className="max-w-[760px] px-1 py-2">
+        <div className="flex items-center gap-3 text-sm font-medium text-slate-500">
           <InfinityRailThinkingIcon />
-          <span>{steps[stepIndex]}</span>
+          <span className="animate-pulse">{steps[stepIndex]}</span>
         </div>
 
         <button
@@ -511,9 +541,8 @@ export function TypingIndicator() {
             {steps.map((step, index) => (
               <li key={step} className="flex items-center gap-2">
                 <span
-                  className={`inline-block h-1.5 w-1.5 rounded-full ${
-                    index <= stepIndex ? "bg-primary" : "bg-slate-300"
-                  }`}
+                  className={`inline-block h-1.5 w-1.5 rounded-full ${index <= stepIndex ? "bg-primary" : "bg-slate-300"
+                    }`}
                 />
                 <span>{step}</span>
               </li>

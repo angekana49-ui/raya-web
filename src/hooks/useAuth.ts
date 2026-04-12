@@ -7,6 +7,7 @@ import { supabase } from "@/lib/supabase/client";
 export interface AuthState {
   user: User | null;
   loading: boolean;
+  isGuest: boolean;
 }
 
 export function useAuth(): AuthState & { signOut: () => Promise<void> } {
@@ -33,5 +34,10 @@ export function useAuth(): AuthState & { signOut: () => Promise<void> } {
     await supabase.auth.signOut();
   }, []);
 
-  return { user, loading, signOut };
+  return {
+    user,
+    loading,
+    signOut,
+    isGuest: user ? !user.email || user.user_metadata?.guest_installation_id : false
+  };
 }

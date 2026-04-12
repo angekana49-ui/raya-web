@@ -6,6 +6,7 @@ import { Brain, Zap, Bot, Sparkles, X, Check, Crown } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { AIOptionId } from "@/types";
 import { NoTranslate } from "@/components/ui/NoTranslate";
+import { getModeLockType, type UserEntitlements } from "@/lib/user-entitlements";
 
 interface AIOption {
   id: AIOptionId;
@@ -13,7 +14,6 @@ interface AIOption {
   description: string;
   icon: typeof Bot;
   color: string;
-  badge?: string;
 }
 
 const AI_OPTIONS: AIOption[] = [
@@ -30,7 +30,6 @@ const AI_OPTIONS: AIOption[] = [
     description: "Concise responses",
     icon: Zap,
     color: "#f59e0b",
-    badge: "PRO",
   },
   {
     id: "deep-thinking",
@@ -38,7 +37,6 @@ const AI_OPTIONS: AIOption[] = [
     description: "Detailed analysis",
     icon: Brain,
     color: "#8b5cf6",
-    badge: "PRO",
   },
   {
     id: "creative-mode",
@@ -46,7 +44,6 @@ const AI_OPTIONS: AIOption[] = [
     description: "Original responses",
     icon: Sparkles,
     color: "#ec4899",
-    badge: "PRO",
   },
 ];
 
@@ -57,8 +54,10 @@ interface AIOptionsMenuProps {
   onModeChange: (mode: string) => void;
   currentModel: string;
   onModelChange: (model: string) => void;
+  entitlements: UserEntitlements;
   anchorEl?: HTMLElement | null;
   onOpenModelPicker: () => void;
+  onLockedModeSelect?: (modeId: string, lockType: "level_up" | "premium") => void;
 }
 
 export default function AIOptionsMenu({
@@ -67,8 +66,10 @@ export default function AIOptionsMenu({
   currentMode,
   onModeChange,
   currentModel,
+  entitlements,
   anchorEl,
   // onOpenModelPicker, // PRO - coming soon
+  onLockedModeSelect,
 }: AIOptionsMenuProps) {
   const menuRef = useRef<HTMLDivElement>(null);
   const [position, setPosition] = useState({ top: 0, left: 0, ready: false });
@@ -127,6 +128,11 @@ export default function AIOptionsMenu({
     onClose();
   };
 
+  const handleLockedSelect = (modeId: string, lockType: "level_up" | "premium") => {
+    onLockedModeSelect?.(modeId, lockType);
+    onClose();
+  };
+
   const getModelName = () => {
     const modelNames: Record<string, string> = {
       "gpt-4-turbo": "GPT-4",
@@ -156,7 +162,7 @@ export default function AIOptionsMenu({
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.95, y: 20 }}
             transition={{ type: "spring", damping: 20, stiffness: 300 }}
-            className="fixed w-[264px] md:w-[272px] max-w-[calc(100vw-16px)] bg-white rounded-2xl p-2.5 shadow-xl border border-gray-200 z-50"
+            className="fixed w-[264px] md:w-[272px] max-w-[calc(100vw-16px)] bg-white/80 backdrop-blur-xl rounded-2xl p-3 shadow-[0_20px_50px_rgba(0,0,0,0.1)] border border-white/40 z-50"
             style={{
               top: position.top,
               left: position.left,
@@ -165,107 +171,104 @@ export default function AIOptionsMenu({
             onClick={(e) => e.stopPropagation()}
           >
             {/* Header */}
-            <div className="flex items-center justify-between mb-2">
-              <h3 className="text-sm font-semibold text-gray-900">Mode <NoTranslate>RAYA</NoTranslate></h3>
+            <div className="flex items-center justify-between mb-3 px-1">
+              <h3 className="text-sm font-bold text-slate-900 tracking-tight">AI Modes</h3>
               <button
                 onClick={onClose}
-                className="p-1 hover:bg-gray-100 rounded-full transition-colors"
+                className="p-1.5 hover:bg-slate-100 rounded-full transition-colors text-slate-400"
               >
-                <X className="w-4 h-4 text-gray-500" />
+                <X className="w-4 h-4" />
               </button>
             </div>
 
-            {/* Pro message - coming soon */}
-            <div className="mb-2 p-2 bg-gray-100 border border-gray-200 rounded-xl opacity-60">
+            {/* Access message */}
+            <div className="mb-3 p-3 bg-indigo-50/50 border border-indigo-100/50 rounded-xl">
               <div className="flex items-start gap-2">
-                <Crown className="w-5 h-5 text-gray-400 flex-shrink-0 mt-0.5" />
+                <Crown className="w-4 h-4 text-indigo-400 flex-shrink-0 mt-0.5" />
                 <div className="flex-1">
-                  <p className="text-sm text-gray-500 font-medium">
-                    PRO modes reserved for subscribers
+                  <p className="text-[11px] text-indigo-700 font-bold leading-tight uppercase tracking-wider">
+                    Advanced Intelligence
                   </p>
-                  <p className="text-xs text-gray-400 mt-1">
-                    Upgrade to a paid plan to access Fast, Deep and Creative modes.
+                  <p className="text-xs text-indigo-500/80 mt-1 leading-snug">
+                    {entitlements.hasPremiumAccess
+                      ? "All advanced modes are active on this account."
+                      : entitlements.levelUpActive
+                        ? "Rush Mode is unlocked. Pro will add the deeper specialist modes later."
+                        : "Use a Level Up Code to unlock Rush Mode. Pro will unlock the full advanced stack."}
                   </p>
-                  <button
-                    disabled
-                    className="mt-1.5 px-2 py-1 bg-gray-300 text-gray-500 text-[10px] font-semibold rounded-lg cursor-not-allowed"
-                  >
-                    Coming soon
-                  </button>
                 </div>
               </div>
             </div>
 
             {/* Modes grid */}
-            <div className="grid grid-cols-2 gap-1.5 mb-2">
+            <div className="grid grid-cols-2 gap-2">
               {AI_OPTIONS.map((option) => {
                 const IconComponent = option.icon;
                 const isSelected = currentMode === option.id;
-                const isPro = !!option.badge;
+                const lockType = getModeLockType(entitlements, option.id);
+                const isLocked = lockType !== null;
+                const badgeLabel = lockType === "level_up" ? "LEVEL UP" : lockType === "premium" ? "PRO" : null;
 
                 return (
                   <button
                     key={option.id}
-                    onClick={() => !isPro && handleSelectMode(option.id)}
-                    disabled={isPro}
+                    onClick={() => {
+                      if (lockType === null) {
+                        handleSelectMode(option.id);
+                        return;
+                      }
+                      handleLockedSelect(option.id, lockType);
+                    }}
                     className={cn(
-                      "relative p-2 rounded-xl border-2 transition-all text-left",
-                      isPro
-                        ? "border-gray-200 bg-gray-100 cursor-not-allowed opacity-50"
+                      "relative p-3 rounded-xl border transition-all text-left",
+                      isLocked
+                        ? "border-slate-100 bg-slate-50/50 cursor-pointer"
                         : isSelected
-                          ? "border-primary bg-primary/5"
-                          : "border-gray-200 bg-gray-50 hover:border-gray-300"
+                          ? "border-indigo-500 bg-indigo-500 text-white shadow-lg shadow-indigo-200"
+                          : "border-slate-100 bg-white/50 hover:border-indigo-200 hover:bg-white"
                     )}
                   >
-                    <div className="flex items-center justify-between mb-1">
+                    <div className="flex items-center justify-between mb-2">
                       <div
-                        className="w-6 h-6 rounded-full flex items-center justify-center"
-                        style={{ backgroundColor: isPro ? "#e5e7eb" : `${option.color}15` }}
+                        className={cn(
+                          "w-7 h-7 rounded-full flex items-center justify-center",
+                          isSelected ? "bg-white/20" : "bg-slate-100"
+                        )}
                       >
                         <IconComponent
-                          className="w-3 h-3"
-                          style={{ color: isPro ? "#9ca3af" : option.color }}
+                          className={cn("w-3.5 h-3.5", isSelected ? "text-white" : "text-slate-600")}
+                          style={!isSelected && !isLocked ? { color: option.color } : {}}
                         />
                       </div>
-                      {isSelected && !isPro && (
-                        <div className="w-3.5 h-3.5 rounded-full bg-primary flex items-center justify-center">
-                          <Check className="w-1.5 h-1.5 text-white" />
+                      {isSelected && !isLocked && (
+                        <div className="w-4 h-4 rounded-full bg-white flex items-center justify-center shadow-sm">
+                          <Check className="w-2 h-2 text-indigo-600" />
                         </div>
                       )}
                     </div>
                     <p
-                      className={cn(
-                        "text-[11px] font-medium",
-                        isPro
-                          ? "text-gray-400"
-                          : isSelected
-                            ? "text-primary"
-                            : "text-gray-900"
+                        className={cn(
+                          "text-[12px] font-bold tracking-tight",
+                          isSelected ? "text-white" : "text-slate-900",
+                          isLocked && "text-slate-500"
+                        )}
+                      >
+                        {option.label}
+                      </p>
+                      {badgeLabel && (
+                        <span className="absolute top-2 right-2 px-1.5 py-0.5 bg-indigo-100 text-indigo-500 text-[9px] font-bold rounded uppercase">
+                          {badgeLabel}
+                        </span>
                       )}
-                    >
-                      {option.label}
-                    </p>
-                    {option.badge && (
-                      <span className="absolute top-2 right-2 px-1.5 py-0.5 bg-gray-200 text-gray-500 text-[9px] font-bold rounded">
-                        SOON
-                      </span>
-                    )}
-                  </button>
+                      {isLocked && (
+                        <p className="mt-1 text-[10px] font-medium text-slate-400">
+                          {lockType === "level_up" ? "Unlock with a Level Up Code" : "Reserved for Pro and Plus"}
+                        </p>
+                      )}
+                    </button>
                 );
               })}
             </div>
-
-            {/* Model selector - PRO (coming soon) */}
-            <button
-              disabled
-              className="w-full flex items-center gap-2 bg-gray-100 rounded-lg p-2.5 cursor-not-allowed opacity-50"
-            >
-              <Bot className="w-3.5 h-3.5 text-gray-400" />
-              <span className="flex-1 text-xs text-gray-400 text-left">
-                Model: {getModelName()}
-              </span>
-              <span className="text-xs text-gray-400 font-medium">Soon</span>
-            </button>
           </motion.div>
         </>
       )}

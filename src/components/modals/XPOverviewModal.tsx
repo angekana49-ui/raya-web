@@ -201,39 +201,6 @@ export default function XPOverviewModal({ visible, onClose, g }: XPOverviewModal
                 </p>
               </div>
 
-              {/* ── Mission completion ── */}
-              <div className="rounded-xl border border-slate-100 bg-slate-50 p-3">
-                <p className="text-[11px] font-semibold text-slate-600 mb-2.5 flex items-center gap-1">
-                  <Target className="w-3.5 h-3.5 text-violet-500" />
-                  Mission Completion
-                </p>
-                <div className="space-y-2">
-                  <div>
-                    <div className="flex items-center justify-between text-[10px] text-slate-500 mb-1">
-                      <span>Weekly</span>
-                      <span className="font-semibold text-violet-600">{g.weeklyCompleted} / 25</span>
-                    </div>
-                    <div className="h-1.5 rounded-full bg-slate-200 overflow-hidden">
-                      <div
-                        className="h-full rounded-full bg-violet-400 transition-all duration-500"
-                        style={{ width: `${Math.min(100, (g.weeklyCompleted / 25) * 100)}%` }}
-                      />
-                    </div>
-                  </div>
-                  <div>
-                    <div className="flex items-center justify-between text-[10px] text-slate-500 mb-1">
-                      <span>Monthly</span>
-                      <span className="font-semibold text-indigo-600">{g.monthlyCompleted} / 100</span>
-                    </div>
-                    <div className="h-1.5 rounded-full bg-slate-200 overflow-hidden">
-                      <div
-                        className="h-full rounded-full bg-indigo-400 transition-all duration-500"
-                        style={{ width: `${Math.min(100, (g.monthlyCompleted / 100) * 100)}%` }}
-                      />
-                    </div>
-                  </div>
-                </div>
-              </div>
 
               {/* ── How to earn XP ── */}
               <div>

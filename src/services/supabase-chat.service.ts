@@ -1,12 +1,81 @@
 import { supabaseAdmin } from '@/lib/supabase/server'
 import type { SessionSummaryPayload } from '@/lib/session-aggregator'
 
+const GUEST_CONVERSATION_VISIBILITY_DAYS = 30
+
+function getGuestVisibilityCutoffIso(): string {
+  const cutoff = new Date()
+  cutoff.setDate(cutoff.getDate() - GUEST_CONVERSATION_VISIBILITY_DAYS)
+  return cutoff.toISOString()
+}
+
+async function getUserAccountState(userId: string): Promise<{
+  hasVerifiedEmail: boolean
+  accountState: 'onboarding_pending' | 'active_unverified' | 'active_verified'
+}> {
+  const { data, error } = await supabaseAdmin
+    .from('users')
+    .select('account_state')
+    .eq('id', userId)
+    .single()
+
+  if (error) throw error
+
+  const accountState = (
+    data?.account_state === 'active_unverified' ||
+    data?.account_state === 'active_verified' ||
+    data?.account_state === 'onboarding_pending'
+  )
+    ? data.account_state
+    : 'onboarding_pending'
+
+  return {
+    hasVerifiedEmail: accountState === 'active_verified',
+    accountState,
+  }
+}
+
+type ConversationAccessRow = {
+  id: string
+  user_id: string
+  context_type: string | null
+  updated_at: string | null
+  study_rooms?:
+    | Array<{
+        id: string
+        is_active: boolean | null
+        created_by: string
+      }>
+    | null
+}
+
+async function getConversationAccessRow(conversationId: string): Promise<ConversationAccessRow | null> {
+  const { data, error } = await supabaseAdmin
+    .from('conversations')
+    .select(`
+      id,
+      user_id,
+      context_type,
+      updated_at,
+      study_rooms (
+        id,
+        is_active,
+        created_by
+      )
+    `)
+    .eq('id', conversationId)
+    .maybeSingle()
+
+  if (error) throw error
+  return data as ConversationAccessRow | null
+}
+
 // ---------- CONVERSATIONS ----------
 
 export async function assertConversationOwnership(userId: string, conversationId: string) {
   const { data, error } = await supabaseAdmin
     .from('conversations')
-    .select('id')
+    .select('id, updated_at')
     .eq('id', conversationId)
     .eq('user_id', userId)
     .maybeSingle()
@@ -17,12 +86,50 @@ export async function assertConversationOwnership(userId: string, conversationId
   }
 }
 
+export async function assertConversationAccessible(userId: string, conversationId: string) {
+  const data = await getConversationAccessRow(conversationId)
+  if (!data) {
+    throw new Error('Conversation not found or access denied')
+  }
+
+  const activeStudyRoom = (data.study_rooms || []).find((room) => room.is_active)
+  const isOwner = data.user_id === userId
+  const isActiveStudyRoomConversation = data.context_type === 'study_room' && !!activeStudyRoom
+
+  if (!isOwner && !isActiveStudyRoomConversation) {
+    throw new Error('Conversation not found or access denied')
+  }
+
+  if (!isOwner) {
+    return data
+  }
+
+  const { hasVerifiedEmail } = await getUserAccountState(userId)
+  if (hasVerifiedEmail) return data
+
+  const cutoffIso = getGuestVisibilityCutoffIso()
+  const updatedAt = data.updated_at ? new Date(data.updated_at).toISOString() : null
+  if (updatedAt && updatedAt < cutoffIso) {
+    throw new Error(`This conversation is hidden until you verify your email.`)
+  }
+
+  return data
+}
+
 export async function getConversations(userId: string) {
-  const { data, error } = await supabaseAdmin
+  const { hasVerifiedEmail } = await getUserAccountState(userId)
+  let query = supabaseAdmin
     .from('conversations')
     .select('id, title, preview, is_active, created_at, updated_at')
     .eq('user_id', userId)
+    .or('context_type.is.null,context_type.eq.general')
     .order('updated_at', { ascending: false })
+
+  if (!hasVerifiedEmail) {
+    query = query.gte('updated_at', getGuestVisibilityCutoffIso())
+  }
+
+  const { data, error } = await query
 
   if (error) throw error
   return data
@@ -50,7 +157,34 @@ export async function updateConversation(
   conversationId: string,
   updates: { title?: string; preview?: string; is_active?: boolean }
 ) {
-  await assertConversationOwnership(userId, conversationId)
+  const accessRow = await getConversationAccessRow(conversationId)
+  if (!accessRow) {
+    throw new Error('Conversation not found or access denied')
+  }
+
+  const isOwner = accessRow.user_id === userId
+  const activeStudyRoom = (accessRow.study_rooms || []).find((room) => room.is_active)
+  const isActiveStudyRoomConversation = accessRow.context_type === 'study_room' && !!activeStudyRoom
+
+  if (!isOwner && !isActiveStudyRoomConversation) {
+    throw new Error('Conversation not found or access denied')
+  }
+
+  // Non-owners in a live study room may refresh preview only (shared transcript / last reply).
+  if (!isOwner) {
+    if (updates.title !== undefined || updates.is_active !== undefined) {
+      throw new Error('Conversation not found or access denied')
+    }
+  } else {
+    const { hasVerifiedEmail } = await getUserAccountState(userId)
+    if (!hasVerifiedEmail) {
+      const cutoffIso = getGuestVisibilityCutoffIso()
+      const updatedAt = accessRow.updated_at ? new Date(accessRow.updated_at).toISOString() : null
+      if (updatedAt && updatedAt < cutoffIso) {
+        throw new Error(`This conversation is hidden until you verify your email.`)
+      }
+    }
+  }
 
   // CRITICAL FIX: Prevent mass assignment. Since supabaseAdmin uses the Service Role key, RLS is bypassed.
   // Passing user input directly into .update() allows attackers to overwrite ANY column (e.g., user_id).
@@ -84,7 +218,7 @@ export async function deleteConversation(userId: string, conversationId: string)
 // ---------- MESSAGES ----------
 
 export async function getMessages(userId: string, conversationId: string) {
-  await assertConversationOwnership(userId, conversationId)
+  await assertConversationAccessible(userId, conversationId)
 
   const { data, error } = await supabaseAdmin
     .from('messages')
@@ -106,9 +240,10 @@ export async function saveMessage(
     mode_used?: string
     tokens_used?: number
     parent_id?: string
+    action_type?: string
   }
 ) {
-  await assertConversationOwnership(userId, conversationId)
+  await assertConversationAccessible(userId, conversationId)
 
   const { data, error } = await supabaseAdmin
     .from('messages')

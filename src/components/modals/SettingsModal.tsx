@@ -1,68 +1,103 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import type { ReactNode } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import {
-  X,
-  Moon,
-  Sun,
-  Monitor,
-  Bell,
-  BellOff,
-  Database,
-  Shield,
-  Trash2,
-  ChevronRight,
-  Download,
-  AlertTriangle,
-} from "lucide-react";
+import { X, Sparkles, Waves, BadgeCheck, UserRound, Info, ShieldCheck, ChevronRight, Smartphone, Share, PlusSquare } from "lucide-react";
+import { APP_VERSION, readAppSettings, writeAppSettings } from "@/lib/app-settings";
 import { cn } from "@/lib/utils";
 
 interface SettingsModalProps {
   isOpen: boolean;
   onClose: () => void;
+  userIsVerified?: boolean;
+  onOpenRayaCard?: () => void;
 }
 
-type Theme = "light" | "dark" | "system";
+function ToggleRow({
+  label,
+  description,
+  enabled,
+  onToggle,
+  icon,
+}: {
+  label: string;
+  description: string;
+  enabled: boolean;
+  onToggle: () => void;
+  icon: ReactNode;
+}) {
+  return (
+    <button
+      onClick={onToggle}
+      className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-left hover:bg-slate-100 transition-colors"
+    >
+      <div className="flex items-start gap-3">
+        <div className="mt-0.5 text-indigo-500">{icon}</div>
+        <div className="flex-1">
+          <div className="flex items-center justify-between gap-3">
+            <span className="text-sm font-semibold text-slate-900">{label}</span>
+            <span
+              className={cn(
+                "relative inline-flex h-6 w-11 shrink-0 rounded-full transition-colors",
+                enabled ? "bg-indigo-500" : "bg-slate-300"
+              )}
+            >
+              <span
+                className={cn(
+                  "absolute top-1 h-4 w-4 rounded-full bg-white shadow-sm transition-transform",
+                  enabled ? "translate-x-6" : "translate-x-1"
+                )}
+              />
+            </span>
+          </div>
+          <p className="mt-1 text-xs leading-relaxed text-slate-500">{description}</p>
+        </div>
+      </div>
+    </button>
+  );
+}
 
-export default function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
-  const [theme, setTheme] = useState<Theme>("light");
-  const [notificationsEnabled, setNotificationsEnabled] = useState(true);
-  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+export default function SettingsModal({
+  isOpen,
+  onClose,
+  userIsVerified = false,
+  onOpenRayaCard,
+}: SettingsModalProps) {
+  const [tipsEnabled, setTipsEnabled] = useState(true);
+  const [reduceMotion, setReduceMotion] = useState(false);
 
-  // Mock storage data
-  const memoryUsage = {
-    used: 12.4, // MB
-    total: 50, // MB
-    percentage: 24.8,
+  useEffect(() => {
+    if (!isOpen) return;
+    const settings = readAppSettings();
+    setTipsEnabled(settings.tipsEnabled);
+    setReduceMotion(settings.reduceMotion);
+  }, [isOpen]);
+
+  const handleTipsToggle = () => {
+    const next = !tipsEnabled;
+    setTipsEnabled(next);
+    writeAppSettings({ tipsEnabled: next });
   };
 
-  const handleThemeChange = (newTheme: Theme) => {
-    setTheme(newTheme);
-    // TODO: Implement actual theme switching
-  };
-
-  const handleDeleteAccount = () => {
-    // TODO: Implement account deletion via API
-    alert("Your deletion request has been sent. You will receive a confirmation email.");
-    setShowDeleteConfirm(false);
-    onClose();
+  const handleReduceMotionToggle = () => {
+    const next = !reduceMotion;
+    setReduceMotion(next);
+    writeAppSettings({ reduceMotion: next });
   };
 
   return (
     <AnimatePresence>
       {isOpen && (
         <>
-          {/* Backdrop */}
           <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="fixed inset-0 bg-black/50 z-[60]"
+            className="zen-backdrop z-[60]"
             onClick={onClose}
           />
 
-          {/* Modal */}
           <motion.div
             initial={{ opacity: 0, scale: 0.95 }}
             animate={{ opacity: 1, scale: 1 }}
@@ -74,7 +109,6 @@ export default function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
               className="bg-white rounded-2xl shadow-xl w-full max-w-md max-h-[85vh] overflow-hidden flex flex-col"
               onClick={(e) => e.stopPropagation()}
             >
-              {/* Header */}
               <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100">
                 <h2 className="text-lg font-bold text-gray-900">Settings</h2>
                 <button
@@ -85,216 +119,113 @@ export default function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                 </button>
               </div>
 
-              {/* Content */}
               <div className="flex-1 overflow-y-auto p-5 space-y-6">
-                {/* Theme */}
                 <div>
-                  <h3 className="text-sm font-semibold text-gray-900 mb-3 flex items-center gap-2">
-                    <Sun className="w-4 h-4 text-gray-600" />
-                    Theme
-                  </h3>
-                  <div className="grid grid-cols-3 gap-2">
-                    <button
-                      onClick={() => handleThemeChange("light")}
-                      className={cn(
-                        "flex flex-col items-center gap-2 p-3 rounded-xl border-2 transition-all",
-                        theme === "light"
-                          ? "border-primary bg-primary/5"
-                          : "border-gray-200 hover:border-gray-300"
-                      )}
-                    >
-                      <Sun className={cn("w-5 h-5", theme === "light" ? "text-primary" : "text-gray-500")} />
-                      <span className={cn("text-xs font-medium", theme === "light" ? "text-primary" : "text-gray-600")}>
-                        Light
-                      </span>
-                    </button>
-                    <button
-                      onClick={() => handleThemeChange("dark")}
-                      className={cn(
-                        "flex flex-col items-center gap-2 p-3 rounded-xl border-2 transition-all",
-                        theme === "dark"
-                          ? "border-primary bg-primary/5"
-                          : "border-gray-200 hover:border-gray-300"
-                      )}
-                    >
-                      <Moon className={cn("w-5 h-5", theme === "dark" ? "text-primary" : "text-gray-500")} />
-                      <span className={cn("text-xs font-medium", theme === "dark" ? "text-primary" : "text-gray-600")}>
-                        Dark
-                      </span>
-                    </button>
-                    <button
-                      onClick={() => handleThemeChange("system")}
-                      className={cn(
-                        "flex flex-col items-center gap-2 p-3 rounded-xl border-2 transition-all",
-                        theme === "system"
-                          ? "border-primary bg-primary/5"
-                          : "border-gray-200 hover:border-gray-300"
-                      )}
-                    >
-                      <Monitor className={cn("w-5 h-5", theme === "system" ? "text-primary" : "text-gray-500")} />
-                      <span className={cn("text-xs font-medium", theme === "system" ? "text-primary" : "text-gray-600")}>
-                        Auto
-                      </span>
-                    </button>
-                  </div>
-                  <p className="text-xs text-gray-400 mt-2">Coming soon</p>
-                </div>
-
-                {/* Notifications */}
-                <div>
-                  <h3 className="text-sm font-semibold text-gray-900 mb-3 flex items-center gap-2">
-                    <Bell className="w-4 h-4 text-gray-600" />
-                    Notifications
-                  </h3>
-                  <button
-                    onClick={() => setNotificationsEnabled(!notificationsEnabled)}
-                    className="w-full flex items-center justify-between p-3 bg-gray-50 rounded-xl hover:bg-gray-100 transition-colors"
-                  >
-                    <div className="flex items-center gap-3">
-                      {notificationsEnabled ? (
-                        <Bell className="w-5 h-5 text-primary" />
-                      ) : (
-                        <BellOff className="w-5 h-5 text-gray-400" />
-                      )}
-                      <span className="text-sm text-gray-700">
-                        {notificationsEnabled ? "Enabled" : "Disabled"}
-                      </span>
-                    </div>
-                    <div
-                      className={cn(
-                        "w-11 h-6 rounded-full transition-colors relative",
-                        notificationsEnabled ? "bg-primary" : "bg-gray-300"
-                      )}
-                    >
-                      <div
-                        className={cn(
-                          "absolute top-1 w-4 h-4 bg-white rounded-full transition-transform shadow-sm",
-                          notificationsEnabled ? "translate-x-6" : "translate-x-1"
-                        )}
-                      />
-                    </div>
-                  </button>
-                  <p className="text-xs text-gray-400 mt-2">Coming soon</p>
-                </div>
-
-                {/* Storage */}
-                <div>
-                  <h3 className="text-sm font-semibold text-gray-900 mb-3 flex items-center gap-2">
-                    <Database className="w-4 h-4 text-gray-600" />
-                    Storage
-                  </h3>
-                  <div className="p-4 bg-gray-50 rounded-xl space-y-3">
-                    {/* Progress bar */}
-                    <div>
-                      <div className="flex justify-between text-xs text-gray-600 mb-1">
-                        <span>Usage</span>
-                        <span>{memoryUsage.used} MB / {memoryUsage.total} MB</span>
-                      </div>
-                      <div className="h-2 bg-gray-200 rounded-full overflow-hidden">
-                        <div
-                          className="h-full bg-primary rounded-full transition-all"
-                          style={{ width: `${memoryUsage.percentage}%` }}
-                        />
-                      </div>
-                    </div>
-                    <p className="text-xs text-gray-500">
-                      Cached data: conversations, preferences, temporary files
-                    </p>
-                    <div className="flex gap-2">
+                  <h3 className="mb-3 text-sm font-semibold text-slate-900">Security & Backup</h3>
+                  <div className="space-y-3">
+                    {!userIsVerified && (
                       <button
-                        disabled
-                        className="flex-1 flex items-center justify-center gap-2 py-2 px-3 bg-white border border-gray-200 rounded-lg text-sm text-gray-400 cursor-not-allowed"
+                        onClick={() => {
+                          onClose();
+                          onOpenRayaCard?.();
+                        }}
+                        className="w-full rounded-2xl border border-violet-200 bg-violet-50 px-4 py-3 text-left hover:bg-violet-100 transition-colors flex items-center justify-between group"
                       >
-                        <Download className="w-4 h-4" />
-                        Export
+                        <div className="flex items-center gap-3">
+                          <div className="rounded-full bg-white p-2 text-violet-600 shadow-sm group-hover:scale-110 transition-transform">
+                            <ShieldCheck className="w-5 h-5" />
+                          </div>
+                          <div>
+                            <p className="text-sm font-bold text-violet-900">Raya Card (Backup)</p>
+                            <p className="text-xs text-violet-600/80 font-medium">Secure your progress without an email</p>
+                          </div>
+                        </div>
+                        <ChevronRight className="w-4 h-4 text-violet-400 group-hover:translate-x-1 transition-transform" />
                       </button>
-                      <button
-                        disabled
-                        className="flex-1 flex items-center justify-center gap-2 py-2 px-3 bg-white border border-gray-200 rounded-lg text-sm text-gray-400 cursor-not-allowed"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                        Clear
-                      </button>
-                    </div>
+                    )}
                   </div>
-                  <p className="text-xs text-gray-400 mt-2">Coming soon</p>
                 </div>
 
-                {/* Privacy */}
                 <div>
-                  <h3 className="text-sm font-semibold text-gray-900 mb-3 flex items-center gap-2">
-                    <Shield className="w-4 h-4 text-gray-600" />
-                    Data & Privacy
-                  </h3>
-                  <div className="space-y-2">
-                    <button
-                      disabled
-                      className="w-full flex items-center justify-between p-3 bg-gray-50 rounded-xl text-gray-400 cursor-not-allowed"
-                    >
-                      <span className="text-sm">View my data</span>
-                      <ChevronRight className="w-4 h-4" />
-                    </button>
-                    <button
-                      disabled
-                      className="w-full flex items-center justify-between p-3 bg-gray-50 rounded-xl text-gray-400 cursor-not-allowed"
-                    >
-                      <span className="text-sm">Export my data</span>
-                      <ChevronRight className="w-4 h-4" />
-                    </button>
-                    <button
-                      disabled
-                      className="w-full flex items-center justify-between p-3 bg-gray-50 rounded-xl text-gray-400 cursor-not-allowed"
-                    >
-                      <span className="text-sm">Privacy policy</span>
-                      <ChevronRight className="w-4 h-4" />
-                    </button>
+                  <h3 className="mb-3 text-sm font-semibold text-slate-900">Preferences</h3>
+                  <div className="space-y-3">
+                    <ToggleRow
+                      label="Show tips & alerts"
+                      description="Control helpful nudges like Level Up Code reminders and other lightweight prompts."
+                      enabled={tipsEnabled}
+                      onToggle={handleTipsToggle}
+                      icon={<Sparkles className="w-4 h-4" />}
+                    />
+                    <ToggleRow
+                      label="Reduce motion"
+                      description="Keep the app calmer by minimizing animations and motion-heavy transitions."
+                      enabled={reduceMotion}
+                      onToggle={handleReduceMotionToggle}
+                      icon={<Waves className="w-4 h-4" />}
+                    />
                   </div>
-                  <p className="text-xs text-gray-400 mt-2">Coming soon</p>
                 </div>
 
-                {/* Supprimer mon compte */}
                 <div>
-                  <h3 className="text-sm font-semibold text-red-600 mb-3 flex items-center gap-2">
-                    <Trash2 className="w-4 h-4" />
-                    Danger zone
-                  </h3>
-                  {!showDeleteConfirm ? (
-                    <button
-                      onClick={() => setShowDeleteConfirm(true)}
-                      className="w-full flex items-center justify-between p-3 bg-red-50 border border-red-200 rounded-xl hover:bg-red-100 transition-colors"
-                    >
-                      <span className="text-sm text-red-600 font-medium">Delete my account</span>
-                      <ChevronRight className="w-4 h-4 text-red-400" />
-                    </button>
-                  ) : (
-                    <div className="p-4 bg-red-50 border border-red-200 rounded-xl space-y-3">
-                      <div className="flex items-start gap-3">
-                        <AlertTriangle className="w-5 h-5 text-red-500 flex-shrink-0 mt-0.5" />
-                        <div>
-                          <p className="text-sm text-red-800 font-medium">
-                            Are you sure you want to delete your account?
+                  <h3 className="mb-3 text-sm font-semibold text-slate-900">App Experience</h3>
+                  <div className="space-y-3">
+                    <div className="rounded-2xl border border-indigo-100 bg-indigo-50/50 p-4">
+                      <div className="flex items-center gap-3 mb-3 text-indigo-600">
+                        <Smartphone className="w-5 h-5" />
+                        <span className="text-sm font-bold uppercase tracking-widest">Mobile Shortcut</span>
+                      </div>
+                      <p className="text-xs text-indigo-900/70 font-medium leading-relaxed mb-4">
+                        Add Raya to your home screen for the best experience. It works just like a native app!
+                      </p>
+
+                      <div className="space-y-3">
+                        <div className="flex items-start gap-3 bg-white/60 p-3 rounded-xl border border-white">
+                          <div className="bg-indigo-100 p-1.5 rounded-lg text-indigo-600"><Share className="w-3.5 h-3.5" /></div>
+                          <p className="text-[11px] font-semibold text-slate-700">
+                            <strong>iOS (Safari):</strong> Tap the share icon and select <span className="text-indigo-600">"Add to Home Screen"</span>.
                           </p>
-                          <p className="text-xs text-red-600 mt-1">
-                            This action is irreversible. All your data, conversations and preferences will be permanently deleted.
+                        </div>
+                        <div className="flex items-start gap-3 bg-white/60 p-3 rounded-xl border border-white">
+                          <div className="bg-indigo-100 p-1.5 rounded-lg text-indigo-600"><PlusSquare className="w-3.5 h-3.5" /></div>
+                          <p className="text-[11px] font-semibold text-slate-700">
+                            <strong>Android (Chrome):</strong> Tap the menu icon (⋮) and select <span className="text-indigo-600">"Install app"</span>.
                           </p>
                         </div>
                       </div>
-                      <div className="flex gap-2">
-                        <button
-                          onClick={() => setShowDeleteConfirm(false)}
-                          className="flex-1 py-2 px-3 bg-white border border-gray-200 rounded-lg text-sm text-gray-700 hover:bg-gray-50 transition-colors"
-                        >
-                          Cancel
-                        </button>
-                        <button
-                          onClick={handleDeleteAccount}
-                          className="flex-1 py-2 px-3 bg-red-600 rounded-lg text-sm text-white font-medium hover:bg-red-700 transition-colors"
-                        >
-                          Delete
-                        </button>
+                    </div>
+                  </div>
+                </div>
+
+                <div>
+                  <h3 className="mb-3 text-sm font-semibold text-slate-900">Account</h3>
+                  <div className="space-y-3 rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                    <div className="flex items-center gap-3">
+                      <div className="rounded-full bg-white p-2 text-indigo-500 shadow-sm">
+                        {userIsVerified ? <BadgeCheck className="w-4 h-4" /> : <UserRound className="w-4 h-4" />}
+                      </div>
+                      <div>
+                        <p className="text-sm font-semibold text-slate-900">Account status</p>
+                        <p className="text-xs text-slate-500">
+                          {userIsVerified ? "Verified account" : "Instant account"}
+                        </p>
                       </div>
                     </div>
-                  )}
+                  </div>
+                </div>
+
+                <div>
+                  <h3 className="mb-3 text-sm font-semibold text-slate-900">About</h3>
+                  <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                    <div className="flex items-center gap-3">
+                      <div className="rounded-full bg-white p-2 text-slate-500 shadow-sm">
+                        <Info className="w-4 h-4" />
+                      </div>
+                      <div>
+                        <p className="text-sm font-semibold text-slate-900">App version</p>
+                        <p className="text-xs text-slate-500">RAYA Web v{APP_VERSION}</p>
+                      </div>
+                    </div>
+                  </div>
                 </div>
               </div>
             </div>

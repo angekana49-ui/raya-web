@@ -46,6 +46,16 @@ export const AI_MODELS: AIModel[] = [
     isAvailable: true,
     isPremium: true,
   },
+  {
+    id: "openai/gpt-oss-120b",
+    name: "GPT-OSS 120B",
+    provider: "openai",
+    description: "Free fallback via Groq — fast and capable",
+    features: ["Text", "Code", "Reasoning", "Analysis"],
+    maxTokens: 32000,
+    isAvailable: true,
+    isPremium: false,
+  },
 ];
 
 export const CHAT_MODES: ChatMode[] = [

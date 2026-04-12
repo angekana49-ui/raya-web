@@ -2,17 +2,21 @@ import { NextRequest, NextResponse } from "next/server";
 import { Resend } from "resend";
 import { supabaseAdmin } from "@/lib/supabase/server";
 import { rayaConfirmSignupTemplate } from "@/lib/email-templates";
+import { verifyTurnstileToken } from "@/lib/turnstile";
 
 const resend = new Resend(process.env.RESEND_API_KEY);
 const FROM = process.env.RESEND_FROM_EMAIL ?? "RAYA <noreply@raya.app>";
 const APP_URL = process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";
 
 export async function POST(req: NextRequest) {
-  const { email, password } = await req.json();
+  const { email, password, captchaToken } = await req.json();
 
   if (!email || !password || password.length < 6) {
     return NextResponse.json({ error: "Invalid input." }, { status: 400 });
   }
+
+  const captchaCheck = await verifyTurnstileToken(captchaToken);
+  if (!captchaCheck.ok) return captchaCheck.response;
 
   // Generate signup confirmation link — password is top-level param, no auto-email sent by Supabase
   const { data, error } = await supabaseAdmin.auth.admin.generateLink({
