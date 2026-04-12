@@ -9,11 +9,21 @@ export async function GET(req: NextRequest) {
   const type = searchParams.get("type");
 
   if (token_hash && type === "signup") {
-    const { error } = await supabaseAdmin.auth.verifyOtp({
+    const { data, error } = await supabaseAdmin.auth.verifyOtp({
       token_hash,
       type: "signup",
     });
     if (!error) {
+      if (data.user) {
+        await supabaseAdmin
+          .from("users")
+          .update({
+            email: data.user.email ?? null,
+            email_verified_at: data.user.email_confirmed_at ?? new Date().toISOString(),
+            auth_method: data.user.email?.endsWith("@zkar.raya.local") ? "recovery_key" : "email",
+          })
+          .eq("auth_user_id", data.user.id);
+      }
       return NextResponse.redirect(`${APP_URL}/?confirmed=1`);
     }
   }
@@ -28,8 +38,29 @@ export async function GET(req: NextRequest) {
       const params = new URLSearchParams({
         reset_password: "1",
         access_token: data.session.access_token,
+        refresh_token: data.session.refresh_token,
       });
       return NextResponse.redirect(`${APP_URL}/?${params.toString()}`);
+    }
+  }
+
+  if (token_hash && type === "email_change") {
+    const { data, error } = await supabaseAdmin.auth.verifyOtp({
+      token_hash,
+      type: "email_change",
+    });
+    if (!error && data.user) {
+      await supabaseAdmin
+        .from("users")
+        .update({
+          email: data.user.email ?? null,
+          email_verified_at: data.user.email_confirmed_at ?? new Date().toISOString(),
+          auth_method: data.user.email?.endsWith("@zkar.raya.local") ? "recovery_key" : "email",
+          account_state: "active_verified",
+        })
+        .eq("auth_user_id", data.user.id);
+
+      return NextResponse.redirect(`${APP_URL}/?email_upgraded=1`);
     }
   }
 

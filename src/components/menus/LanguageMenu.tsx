@@ -3,22 +3,25 @@
 import { useEffect, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { ChevronLeft, Check } from "lucide-react";
+import { NoTranslate } from "@/components/ui/NoTranslate";
 
 interface Language {
   code: string;
   name: string;
+  nativeName: string;
+  langTag: string;
   shortLabel: string;
 }
 
-const languages: Language[] = [
-  { code: "en", name: "English", shortLabel: "EN" },
-  { code: "fr", name: "French", shortLabel: "FR" },
-  { code: "de", name: "German", shortLabel: "DE" },
-  { code: "ar", name: "Arabic", shortLabel: "AR" },
-  { code: "zh-CN", name: "Chinese", shortLabel: "ZH" },
-  { code: "ru", name: "Russian", shortLabel: "RU" },
-  { code: "pt", name: "Portuguese", shortLabel: "PT" },
-  { code: "es", name: "Spanish", shortLabel: "ES" },
+export const languages: Language[] = [
+  { code: "en", name: "English", nativeName: "English", langTag: "en", shortLabel: "EN" },
+  { code: "fr", name: "French", nativeName: "Français", langTag: "fr", shortLabel: "FR" },
+  { code: "de", name: "German", nativeName: "Deutsch", langTag: "de", shortLabel: "DE" },
+  { code: "ar", name: "Arabic", nativeName: "العربية", langTag: "ar", shortLabel: "AR" },
+  { code: "zh-CN", name: "Chinese", nativeName: "中文", langTag: "zh-CN", shortLabel: "ZH" },
+  { code: "ru", name: "Russian", nativeName: "Русский", langTag: "ru", shortLabel: "RU" },
+  { code: "pt", name: "Portuguese", nativeName: "Português", langTag: "pt", shortLabel: "PT" },
+  { code: "es", name: "Spanish", nativeName: "Español", langTag: "es", shortLabel: "ES" },
 ];
 
 interface LanguageMenuProps {
@@ -27,7 +30,7 @@ interface LanguageMenuProps {
 }
 
 // Change language via Google Translate.
-function changeLanguage(langCode: string) {
+export function changeLanguage(langCode: string) {
   const selectElement = document.querySelector(".goog-te-combo") as HTMLSelectElement | null;
 
   if (selectElement) {
@@ -53,7 +56,7 @@ function getCurrentLanguage(): string {
 }
 
 export default function LanguageMenu({ isOpen, onClose }: LanguageMenuProps) {
-  const [currentLang, setCurrentLang] = useState("en");
+  const [currentLang, setCurrentLang] = useState(getCurrentLanguage);
 
   useEffect(() => {
     setCurrentLang(getCurrentLanguage());
@@ -100,7 +103,14 @@ export default function LanguageMenu({ isOpen, onClose }: LanguageMenuProps) {
                     <span className="text-xs px-1.5 py-0.5 rounded bg-gray-100 text-gray-600 font-medium">
                       {lang.shortLabel}
                     </span>
-                    <span className="text-sm text-gray-700">{lang.name}</span>
+                    <NoTranslate
+                      as="span"
+                      className="text-sm text-gray-700"
+                    >
+                      <span lang={lang.langTag} dir={lang.code === "ar" ? "rtl" : "ltr"}>
+                        {lang.nativeName}
+                      </span>
+                    </NoTranslate>
                   </div>
                   {currentLang === lang.code && <Check className="w-4 h-4 text-primary" />}
                 </div>

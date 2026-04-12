@@ -3,6 +3,8 @@ import Script from "next/script";
 import "./globals.css";
 import "katex/dist/katex.min.css";
 import { GoogleTranslateScript } from "@/components/menus/LanguageMenu";
+import SocialNotificationCenter from "@/components/social/SocialNotificationCenter";
+import UnifiedToastStack from "@/components/notifications/UnifiedToastStack";
 
 const siteUrl = "https://raya.thebluestift.com";
 const normalizedSiteUrl = (process.env.NEXT_PUBLIC_APP_URL ?? siteUrl).replace(/\/$/, "");
@@ -125,6 +127,8 @@ export default function RootLayout({
       <body className="antialiased font-sans">
         {children}
         <GoogleTranslateScript />
+        <SocialNotificationCenter />
+        <UnifiedToastStack />
       </body>
     </html>
   );

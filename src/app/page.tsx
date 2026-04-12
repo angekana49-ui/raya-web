@@ -45,7 +45,7 @@ import { useStudyRooms } from "@/hooks/useStudyRooms";
 import { useAuth } from "@/hooks/useAuth";
 import { useUserEntitlements } from "@/hooks/useUserEntitlements";
 import { useUserProfile } from "@/hooks/useUserProfile";
-import type { UserProfile } from "@/hooks/useUserProfile";
+import type { AuthResetSession, UserProfile } from "@/hooks/useUserProfile";
 import { supabase } from "@/lib/supabase/client";
 import {
   buildConversationHistoryFromLeaf,
@@ -81,6 +81,9 @@ import { canShowPopup, markPopupSeen } from "@/lib/popup-cadence";
 type PopupQueueItem = Omit<SmartPopupContent, "open" | "onClose"> & {
   durationMs?: number;
 };
+
+const MAX_CONVERSATION_HISTORY = 20;
+const STREAM_REQUEST_TIMEOUT_MS = 45000;
 
 async function getAuthHeaders(): Promise<Record<string, string>> {
   const { data: { session } } = await supabase.auth.getSession();
@@ -158,7 +161,7 @@ export default function Home() {
   const [modelMenuVisible, setModelMenuVisible] = useState(false);
   const [promptsModalVisible, setPromptsModalVisible] = useState(false);
   const [authModalVisible, setAuthModalVisible] = useState(false);
-  const [authResetToken, setAuthResetToken] = useState<string | undefined>(undefined);
+  const [authResetToken, setAuthResetToken] = useState<AuthResetSession | undefined>(undefined);
   const [authUpgradeMode, setAuthUpgradeMode] = useState(false);
   const [authEmailUpgraded, setAuthEmailUpgraded] = useState(false);
   const [popupQueue, setPopupQueue] = useState<PopupQueueItem[]>([]);
@@ -205,6 +208,8 @@ export default function Home() {
     handleCreateRoom,
     handleJoinRoom,
     handleRemoveRoom,
+    roomError,
+    clearRoomError,
   } = useStudyRooms({
     authLoading,
     isProfileComplete,
@@ -392,6 +397,24 @@ export default function Home() {
       }
     };
   }, [activePopup]);
+
+  useEffect(() => {
+    if (!roomError) return;
+    const errorObj = typeof roomError === "string" ? { tone: "error" as const, title: "Error", message: roomError } : roomError;
+    enqueuePopup({
+      tone: errorObj.tone,
+      title: errorObj.title,
+      message: errorObj.message,
+      primaryAction: {
+        label: "Understood",
+        onClick: () => {
+          clearRoomError();
+          closeActivePopup();
+        },
+      },
+      durationMs: 8000,
+    });
+  }, [roomError, enqueuePopup, clearRoomError, closeActivePopup]);
 
   useEffect(() => {
     if (authLoading || !user || entitlements.levelUpActive) return;
@@ -644,27 +667,35 @@ export default function Home() {
 
         // Call streaming API
         const authHeaders = await getAuthHeaders();
-        const res = await fetch("/api/raya/stream", {
-          method: "POST",
-          headers: { "Content-Type": "application/json", ...authHeaders },
-          body: JSON.stringify({
-            message: messageForAi,
-            clientMessageId: userMessage.id,
-            conversationId: convId,
-            aiMode,
-            model: selectedModel,
-            userTier: entitlements.hasPremiumAccess ? "premium" : "free",
-            studentContext: buildStudentContext(gamification.state, profile),
-            conversationHistory: conversationHistoryRef.current,
-            parentId: userMessage.parentId,
-            files: userMessage.files?.map((f) => ({
-              name: f.name,
-              type: f.type,
-              mimeType: f.mimeType,
-              base64: f.base64,
-            })),
-          }),
-        });
+        const controller = new AbortController();
+        const timeoutId = window.setTimeout(() => controller.abort(), STREAM_REQUEST_TIMEOUT_MS);
+        let res: Response;
+        try {
+          res = await fetch("/api/raya/stream", {
+            method: "POST",
+            headers: { "Content-Type": "application/json", ...authHeaders },
+            body: JSON.stringify({
+              message: messageForAi,
+              clientMessageId: userMessage.id,
+              conversationId: convId,
+              aiMode,
+              model: selectedModel,
+              userTier: entitlements.hasPremiumAccess ? "premium" : "free",
+              studentContext: buildStudentContext(gamification.state, profile),
+              conversationHistory: conversationHistoryRef.current.slice(-MAX_CONVERSATION_HISTORY),
+              parentId: userMessage.parentId,
+              files: userMessage.files?.map((f) => ({
+                name: f.name,
+                type: f.type,
+                mimeType: f.mimeType,
+                base64: f.base64,
+              })),
+            }),
+            signal: controller.signal,
+          });
+        } finally {
+          window.clearTimeout(timeoutId);
+        }
 
         if (!res.ok) {
           const errText = await res.text();
@@ -788,23 +819,26 @@ export default function Home() {
           }
         };
 
-        while (true) {
-          const { done, value } = await reader.read();
-          if (value) {
-            buffer += decoder.decode(value, { stream: !done });
+        try {
+          while (true) {
+            const { done, value } = await reader.read();
+            if (value) {
+              buffer += decoder.decode(value, { stream: !done });
 
-            // Parse SSE lines from buffer
-            const lines = buffer.split("\n");
-            buffer = lines.pop() || "";
-            for (const line of lines) handleSseLine(line);
+              const lines = buffer.split("\n");
+              buffer = lines.pop() || "";
+              for (const line of lines) handleSseLine(line);
+            }
+
+            if (done) break;
           }
 
-          if (done) break;
-        }
-        // Flush any trailing decoder bytes and leftover line.
-        buffer += decoder.decode();
-        if (buffer.trim().length > 0) {
-          handleSseLine(buffer);
+          buffer += decoder.decode();
+          if (buffer.trim().length > 0) {
+            handleSseLine(buffer);
+          }
+        } finally {
+          reader.releaseLock();
         }
 
         if (!streamHadError) {
@@ -841,6 +875,9 @@ export default function Home() {
       } catch (err: any) {
         console.error("Send message error:", err);
         setIsTyping(false);
+        const errorText = err?.name === "AbortError"
+          ? "The assistant took too long to respond. Please retry."
+          : err?.message || "An error occurred. Please try again.";
         setAllMessages((prev) => {
           const newId = (Date.now() + 1).toString();
           setActiveLeafId(newId);
@@ -849,7 +886,7 @@ export default function Home() {
             {
               id: newId,
               sender: "assistant" as const,
-              text: err?.message || "An error occurred. Please try again.",
+              text: errorText,
               timestamp: new Date(),
               parentId: userMessage.id,
             },
@@ -923,7 +960,7 @@ export default function Home() {
         // Rebuild multi-turn history for the active branch only
         // Delay this slightly because activeMessages takes a render cycle to update
         setTimeout(() => {
-          conversationHistoryRef.current = buildConversationHistoryFromRecords(messageRecords);
+          conversationHistoryRef.current = buildConversationHistoryFromRecords(messageRecords).slice(-MAX_CONVERSATION_HISTORY);
         }, 0);
       }
     } catch (err) {
@@ -954,22 +991,24 @@ export default function Home() {
   const handleMorePrompts = () => setPromptsModalVisible(true);
   const handleSelectPrompt = (prompt: string) => setInput(prompt);
 
-  const handleVoicePress = () => {
-    setAllMessages((prev) => {
-      const newId = (Date.now() + 2).toString();
-      setActiveLeafId(newId);
-      return [
-        ...prev,
-        {
-          id: newId,
-          sender: "assistant",
-          text: "Voice mode is coming soon. For now, you can type your question or attach an image.",
-          timestamp: new Date(),
-          parentId: activeLeafId || undefined,
+  const handleVoicePress = useCallback(() => {
+    enqueuePopup({
+      tone: "info",
+      title: "Voice Is Not In The MVP",
+      message: "Voice input is not enabled yet. For now, type your question or attach an image/document so Raya can help immediately.",
+      primaryAction: {
+        label: "Attach a File",
+        onClick: () => {
+          setFileMenuVisible(true);
+          closeActivePopup();
         },
-      ]
+      },
+      secondaryAction: {
+        label: "Keep Typing",
+        onClick: closeActivePopup,
+      },
     });
-  };
+  }, [closeActivePopup, enqueuePopup]);
 
   const handleNewChat = async () => {
     if (activeConversationId) {
@@ -1116,9 +1155,9 @@ export default function Home() {
     });
   }, [enqueuePopup, closeActivePopup]);
 
-  const menuDisplayName = profile.displayName || user?.email?.split("@")[0] || "User";
+  const menuDisplayName = profile.displayName || profile.username || "Student";
   const menuUsername = profile.username ? `@${profile.username}` : "@student";
-  const menuContact = user?.email ?? menuUsername;
+  const menuContact = profile.hasVerifiedEmail ? (user?.email ?? menuUsername) : menuUsername;
   const usageSummary = `${entitlements.tokenLimit === null ? "Unlimited" : `${Math.round(entitlements.tokenLimit / 1000)}k`} tokens · ${entitlements.fileUploadLimit === null ? "Unlimited" : entitlements.fileUploadLimit} file upload${entitlements.fileUploadLimit === 1 ? "" : "s"}`;
   const usageDescription = entitlements.hasPremiumAccess
     ? `Premium access is active with ${entitlements.roomMinutesLimit} minute rooms and an XP x${entitlements.xpMultiplier} booster.`
@@ -1132,11 +1171,27 @@ export default function Home() {
       setPromoModalOpen(true);
       return;
     }
-    window.alert("This mode is planned for Pro or Plus. The paywall is not live yet, but the lock is now real.");
-  }, []);
+    enqueuePopup({
+      tone: "info",
+      title: "Premium Mode Locked",
+      message: "This AI mode is reserved for Pro or Plus. The lock is real even if the full paywall is not live yet.",
+      primaryAction: {
+        label: "Use Available Modes",
+        onClick: closeActivePopup,
+      },
+    });
+  }, [closeActivePopup, enqueuePopup]);
   const handleLockedModelSelect = useCallback(() => {
-    window.alert("Advanced models are reserved for Pro or Plus. The paywall is not live yet, but the lock is now real.");
-  }, []);
+    enqueuePopup({
+      tone: "info",
+      title: "Advanced Model Locked",
+      message: "Advanced models are reserved for Pro or Plus. You can keep studying with the currently unlocked models.",
+      primaryAction: {
+        label: "Use Current Model",
+        onClick: closeActivePopup,
+      },
+    });
+  }, [closeActivePopup, enqueuePopup]);
   const isRoomView = activeView === "rooms";
   const showSoloHeader = !isRoomView && showHeader;
   const selectedRoomInviteUrl =
@@ -1402,7 +1457,7 @@ export default function Home() {
                   roomName={selectedRoom.title}
                   mission={selectedRoom.mission}
                   onlineCount={selectedRoom.onlineCount}
-                  maxMembers={selectedRoom.maxMembers}
+                  maxMembers={selectedRoom.maxMembers ?? 8}
                   durationMinutes={selectedRoom.duration ?? 0}
                   timerEndsAt={selectedRoom.timerEndsAt ?? null}
                   timerStatus={selectedRoom.timerStatus ?? "idle"}
@@ -1416,9 +1471,14 @@ export default function Home() {
                   onEngage={registerInvitedGuestEngagement}
                   onToggleSidebar={() => setSidebarVisible((prev) => !prev)}
                   onTogglePanel={() => setLearningHudVisible((prev) => !prev)}
+                  onReturnToLobby={() => {
+                    setActiveView("rooms");
+                    setActiveRoomId(null);
+                  }}
                   panelOpen={learningHudVisible}
                   files={selectedRoom.files}
-                  isCreator={true}
+                  isCreator={false}
+                  roomAiMode={selectedRoom.aiMode ?? "active"}
                   conversationId={selectedRoom.conversationId}
                   roomId={selectedRoom.id}
                   currentUserId={user?.id}
@@ -1437,6 +1497,7 @@ export default function Home() {
                     setActiveRoomId(id);
                   }}
                   onRoomFull={handleRoomFull}
+                  onRemoveRoom={handleRemoveRoom}
                 />
               )
             ) : (
@@ -1522,9 +1583,15 @@ export default function Home() {
               accent,
               streak: 0,
             }))}
-            roomId={selectedRoom.id}
-            roomName={selectedRoom.title}
-            files={selectedRoom.files}
+            roomId={activeRoomId ? selectedRoom.id : undefined}
+            roomName={activeRoomId ? selectedRoom.title : undefined}
+            mission={activeRoomId ? selectedRoom.mission : undefined}
+            timerStatus={activeRoomId ? (selectedRoom.timerStatus ?? "idle") : "idle"}
+            timerEndsAt={activeRoomId ? selectedRoom.timerEndsAt ?? null : null}
+            onlineCount={activeRoomId ? selectedRoom.onlineCount : undefined}
+            maxMembers={activeRoomId ? (selectedRoom.maxMembers ?? 8) : undefined}
+            roomAiMode={activeRoomId ? (selectedRoom.aiMode ?? "active") : undefined}
+            files={activeRoomId ? selectedRoom.files : undefined}
           />
         ) : (
           <ProgressSidebar
@@ -1537,6 +1604,10 @@ export default function Home() {
             userIsVerified={profile.hasVerifiedEmail}
             hasUnsavedProgress={hasUnsavedProgress}
             onVerify={() => setAuthModalVisible(true)}
+            usageSummary={usageSummary}
+            usageDescription={usageDescription}
+            accountLabel={menuDisplayName}
+            accountHandle={menuContact}
           />
         )}
 

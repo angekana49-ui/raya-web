@@ -1,8 +1,11 @@
 "use client";
 
+import { useState, useEffect } from "react";
 import { motion } from "framer-motion";
-import { Users, Plus, Link2, Sparkles, Clock, Globe, Menu, ChevronRight } from "lucide-react";
+import { Users, Plus, Link2, Sparkles, Clock, Globe, Menu, ChevronRight, Archive } from "lucide-react";
 import type { StudyRoomPreview } from "@/types";
+import { getStudyRoomStatusMeta } from "@/lib/study-room-data";
+import { cn } from "@/lib/utils";
 
 interface StudyRoomsLobbyProps {
   rooms: StudyRoomPreview[];
@@ -27,6 +30,28 @@ export default function StudyRoomsLobby({
   onRoomFull,
   onRemoveRoom,
 }: StudyRoomsLobbyProps) {
+  const activeRooms = rooms.filter((room) => room.timerStatus !== "finished");
+  const closedRooms = rooms.filter((room) => room.timerStatus === "finished");
+  
+  const [confirmingRemoveId, setConfirmingRemoveId] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (confirmingRemoveId) {
+      const timer = setTimeout(() => setConfirmingRemoveId(null), 3000);
+      return () => clearTimeout(timer);
+    }
+  }, [confirmingRemoveId]);
+
+  const handleRemoveClick = (e: React.MouseEvent, id: string) => {
+    e.stopPropagation();
+    if (confirmingRemoveId === id) {
+      onRemoveRoom?.(id);
+      setConfirmingRemoveId(null);
+    } else {
+      setConfirmingRemoveId(id);
+    }
+  };
+
   return (
     <div className="flex-1 min-h-0 overflow-y-auto px-4 py-6 md:p-10">
       <div className="max-w-5xl mx-auto space-y-10">
@@ -100,16 +125,16 @@ export default function StudyRoomsLobby({
         {/* Active Rooms Grid */}
         <section className="space-y-6">
           <div className="flex items-center justify-between px-2">
-            <h2 className="text-xl font-bold text-slate-900 flex items-center gap-2">
-              <Globe className="w-5 h-5 text-indigo-500" />
-              Active Sessions
-            </h2>
-            <span className="text-sm font-bold text-slate-500 bg-slate-100 px-3 py-1 rounded-full">
-              {rooms.length} {rooms.length === 1 ? 'room' : 'rooms'} online
-            </span>
-          </div>
+              <h2 className="text-xl font-bold text-slate-900 flex items-center gap-2">
+                <Globe className="w-5 h-5 text-indigo-500" />
+                Active Sessions
+              </h2>
+              <span className="text-sm font-bold text-slate-500 bg-slate-100 px-3 py-1 rounded-full">
+                {activeRooms.length} {activeRooms.length === 1 ? 'active room' : 'active rooms'}
+              </span>
+            </div>
 
-          {rooms.length === 0 ? (
+          {activeRooms.length === 0 ? (
             <div className="rounded-[2rem] border-2 border-dashed border-indigo-100 bg-indigo-50/30 flex flex-col items-center justify-center py-20 px-4 text-center">
               <div className="w-16 h-16 rounded-full bg-indigo-100 flex items-center justify-center mb-4">
                 <Users className="w-8 h-8 text-indigo-400" />
@@ -127,8 +152,10 @@ export default function StudyRoomsLobby({
             </div>
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
-              {rooms.map((room, idx) => {
-                const isFull = room.onlineCount >= room.maxMembers;
+              {activeRooms.map((room, idx) => {
+                const statusMeta = getStudyRoomStatusMeta(room);
+                const isFull = statusMeta.status === "full";
+                const isClosed = statusMeta.status === "closed";
                 return (
                   <motion.div
                     initial={{ opacity: 0, y: 20 }}
@@ -140,42 +167,63 @@ export default function StudyRoomsLobby({
                         onRoomFull?.(room);
                         return;
                       }
+                      if (isClosed) {
+                        return;
+                      }
                       onSelectRoom(room.id);
                     }}
                     className={`relative group cursor-pointer flex flex-col rounded-3xl border p-5 transition-all duration-300 hover:-translate-y-1 hover:shadow-xl ${
-                      isFull 
+                      statusMeta.status !== "live"
                         ? "border-slate-200 bg-slate-50 opacity-80" 
                         : "border-indigo-100 bg-white shadow-sm hover:border-indigo-300 hover:shadow-indigo-100/50"
                     }`}
                   >
                     {/* Dismiss Room Button */}
                     <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        onRemoveRoom?.(room.id);
-                      }}
-                      className="absolute -top-2 -right-2 z-10 hidden h-8 w-8 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-400 shadow-sm transition-all hover:bg-red-50 hover:text-red-500 hover:border-red-200 group-hover:flex"
-                      aria-label="Dismiss room"
+                      onClick={(e) => handleRemoveClick(e, room.id)}
+                      className={cn(
+                        "absolute right-4 top-4 z-10 items-center gap-1.5 rounded-full border px-3 py-1.5 text-[10px] font-black uppercase tracking-widest shadow-sm transition-all flex md:hidden group-hover:flex",
+                        confirmingRemoveId === room.id
+                          ? "bg-red-500 text-white border-red-500 opacity-100"
+                          : "border-slate-200 bg-white/95 text-slate-500 hover:border-slate-300 hover:bg-slate-50 hover:text-slate-700"
+                      )}
+                      aria-label="Remove from room history"
                     >
-                      <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+                      <Archive className="h-3.5 w-3.5" />
+                      {confirmingRemoveId === room.id ? "Cacher?" : "Hide"}
                     </button>
 
                     <div className="flex items-center justify-between mb-4">
                       <div className="flex items-center gap-2">
                         <span className="flex w-2.5 h-2.5 relative">
-                          {!isFull && <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>}
-                          <span className={`relative inline-flex rounded-full w-2.5 h-2.5 ${isFull ? 'bg-orange-500' : 'bg-emerald-500'}`}></span>
+                          <span className={`relative inline-flex rounded-full w-2.5 h-2.5 ${
+                            statusMeta.status === "closed"
+                              ? "bg-slate-400"
+                              : statusMeta.status === "full"
+                                ? "bg-orange-500"
+                                : "bg-emerald-500"
+                          }`}></span>
                         </span>
-                        <span className={`text-xs font-black uppercase tracking-widest ${isFull ? 'text-orange-600' : 'text-emerald-600'}`}>
-                          {isFull ? 'Full' : 'Live'}
+                        <span className={`text-xs font-black uppercase tracking-widest ${
+                          statusMeta.status === "closed"
+                            ? "text-slate-500"
+                            : statusMeta.status === "full"
+                              ? "text-orange-600"
+                              : "text-emerald-600"
+                        }`}>
+                          {statusMeta.label}
                         </span>
                       </div>
-                      
+                       
                       <div className={`text-xs font-bold px-2 py-1 rounded-lg flex items-center gap-1 shrink-0 ${
-                        isFull ? 'bg-orange-100 text-orange-700' : 'bg-indigo-50 text-indigo-700'
+                        statusMeta.status === "closed"
+                          ? "bg-slate-200 text-slate-600"
+                          : statusMeta.status === "full"
+                            ? "bg-orange-100 text-orange-700"
+                            : "bg-indigo-50 text-indigo-700"
                       }`}>
                         <Users className="w-3.5 h-3.5" />
-                        {room.onlineCount}/{room.maxMembers}
+                        {statusMeta.detail}
                       </div>
                     </div>
                     
@@ -206,6 +254,68 @@ export default function StudyRoomsLobby({
             </div>
           )}
         </section>
+
+        {closedRooms.length > 0 && (
+          <section className="space-y-6">
+            <div className="flex items-center justify-between px-2">
+              <h2 className="text-xl font-bold text-slate-900 flex items-center gap-2">
+                <Archive className="w-5 h-5 text-slate-500" />
+                Recent Sessions
+              </h2>
+              <span className="text-sm font-bold text-slate-500 bg-slate-100 px-3 py-1 rounded-full">
+                {closedRooms.length} archived
+              </span>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+              {closedRooms.map((room, idx) => (
+                <motion.div
+                  initial={{ opacity: 0, y: 20 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: idx * 0.04 }}
+                  key={room.id}
+                  onClick={() => onSelectRoom(room.id)}
+                  className="relative group cursor-pointer rounded-3xl border border-slate-200 bg-[linear-gradient(180deg,#ffffff_0%,#f8fafc_100%)] p-5 shadow-sm transition-all duration-300 hover:-translate-y-1 hover:shadow-lg"
+                >
+                  <button
+                    onClick={(e) => handleRemoveClick(e, room.id)}
+                    className={cn(
+                      "absolute right-4 top-4 z-10 items-center gap-1.5 rounded-full border px-3 py-1.5 text-[10px] font-black uppercase tracking-widest shadow-sm transition-all flex md:hidden group-hover:flex",
+                      confirmingRemoveId === room.id
+                        ? "bg-red-500 text-white border-red-500 opacity-100"
+                        : "border-slate-200 bg-white/95 text-slate-500 hover:border-slate-300 hover:bg-slate-50 hover:text-slate-700"
+                    )}
+                    aria-label="Remove from room history"
+                  >
+                    <Archive className="h-3.5 w-3.5" />
+                    {confirmingRemoveId === room.id ? "Cacher?" : "Hide"}
+                  </button>
+
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="rounded-full bg-slate-200 px-3 py-1 text-[10px] font-black uppercase tracking-[0.2em] text-slate-600">
+                      Closed
+                    </span>
+                    <span className="rounded-full bg-white px-3 py-1 text-[10px] font-black uppercase tracking-[0.2em] text-slate-500 border border-slate-200">
+                      {room.hasReport ? "Report Ready" : "Report Available"}
+                    </span>
+                  </div>
+
+                  <h3 className="mt-4 text-lg font-bold text-slate-900">{room.title}</h3>
+                  <p className="mt-2 text-sm leading-relaxed text-slate-500 line-clamp-2">{room.mission}</p>
+
+                  <div className="mt-5 flex flex-wrap items-center gap-2 text-xs font-bold text-slate-500">
+                    <span className="rounded-full border border-slate-200 bg-white px-3 py-1.5">
+                      {room.hasReport ? "Open report view" : "Generate final report"}
+                    </span>
+                    <span className="rounded-full border border-slate-200 bg-white px-3 py-1.5">
+                      {room.duration ? `${room.duration} min room` : "Room session"}
+                    </span>
+                  </div>
+                </motion.div>
+              ))}
+            </div>
+          </section>
+        )}
       </div>
     </div>
   );

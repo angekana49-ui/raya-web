@@ -45,3 +45,6 @@ next-env.d.ts
 /docs/
 /supabase/.temp/
 /.vscode/
+
+# Supabase temp
+supabase/.temp/

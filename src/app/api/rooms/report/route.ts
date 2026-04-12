@@ -2,7 +2,26 @@ import { NextRequest } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase/server';
 import { resolveUserId } from '@/lib/auth';
 import { RayaAIService } from '@/services/raya-ai.service';
-import { getMessages } from '@/services/supabase-chat.service';
+import {
+  buildFallbackStudyRoomReport,
+  normalizeStudyRoomReport,
+  type StudyRoomReport,
+} from '@/lib/room-report';
+
+const MAX_REPORT_TRANSCRIPT_CHARS = 12000;
+
+function safeParseJsonReport(raw: string): Partial<StudyRoomReport> | null {
+  const cleaned = raw.replace(/```json|```/g, '').trim();
+  const firstBrace = cleaned.indexOf('{');
+  const lastBrace = cleaned.lastIndexOf('}');
+  if (firstBrace === -1 || lastBrace === -1 || lastBrace <= firstBrace) return null;
+
+  try {
+    return JSON.parse(cleaned.slice(firstBrace, lastBrace + 1));
+  } catch {
+    return null;
+  }
+}
 
 export async function POST(req: NextRequest) {
   try {
@@ -46,12 +65,30 @@ export async function POST(req: NextRequest) {
     if (!room.conversation_id) {
        return new Response(JSON.stringify({ error: 'No conversation linked to this room' }), { status: 400 });
     }
-    const messages = await getMessages(userId, room.conversation_id);
+    const { data: messages, error: messagesError } = await supabaseAdmin
+      .from('messages')
+      .select('id, sender, text, timestamp')
+      .eq('conversation_id', room.conversation_id)
+      .order('timestamp', { ascending: true });
+
+    if (messagesError) {
+      throw messagesError;
+    }
     
     // 3. Prepare AI Summation
-    const transcript = messages
-      .map((m: any) => `${m.sender.toUpperCase()}: ${m.text}`)
-      .join('\n');
+    const transcriptLines = messages
+      .map((m: any) => ({
+        sender: String(m.sender || 'member'),
+        text: String(m.text || '').trim(),
+      }))
+      .filter((line) => line.text.length > 0);
+
+    let transcript = '';
+    for (const line of transcriptLines) {
+      const nextLine = `${line.sender.toUpperCase()}: ${line.text}\n`;
+      if ((transcript + nextLine).length > MAX_REPORT_TRANSCRIPT_CHARS) break;
+      transcript += nextLine;
+    }
 
     const raya = new RayaAIService({
       apiKey: process.env.GEMINI_API_KEY!,
@@ -60,47 +97,88 @@ export async function POST(req: NextRequest) {
     });
 
     const summaryPrompt = `
-      You are the RAYA Squad Moderator. The study session for "${room.title}" has just ended.
-      Mission was: "${room.mission}"
-      
-      Below is the full transcript of the session:
-      ---
-      ${transcript}
-      ---
-      
-      Generate a final "Squad Report" in the following JSON format:
-      {
-        "summary": "A 2-3 sentence overview of the session outcomes.",
-        "squad_score": 0-100 (integer representing collaboration and focus),
-        "key_learnings": "What the squad actually achieved or learned.",
-        "highlights": ["Point 1", "Point 2"],
-        "recommendations": "What the squad should do next to consolidate knowledge."
-      }
-      
-      Return ONLY the JSON block. Do not include any other text.
-    `;
+You are the RAYA Squad Moderator. The study session for "${room.title}" has just ended.
+Mission: "${room.mission}"
 
-    const response = await raya.chat(summaryPrompt);
-    let reportData;
-    try {
-      reportData = JSON.parse(response.text.replace(/```json|```/g, '').trim());
-    } catch (e) {
-      console.error('Failed to parse AI report:', response.text);
-      throw new Error('AI failed to generate a valid report format');
+Below is the room transcript excerpt:
+---
+${transcript.trim()}
+---
+
+Return a final squad report as strict JSON only:
+{
+  "summary": "2-3 sentence session overview",
+  "squad_score": 0,
+  "key_learnings": "What the squad actually understood or produced",
+  "highlights": ["Short highlight 1", "Short highlight 2", "Short highlight 3"],
+  "recommendations": "What to do next"
+}
+
+Rules:
+- Keep it readable on mobile.
+- Ground the report in the transcript.
+- Do not include markdown fences.
+- Keep highlights short.
+`.trim();
+
+    let reportPayload: StudyRoomReport;
+    if (transcriptLines.length === 0) {
+      reportPayload = buildFallbackStudyRoomReport({
+        roomId,
+        conversationId: room.conversation_id,
+        mission: room.mission,
+        transcriptLines,
+      });
+    } else {
+      try {
+        const response = await raya.chat(summaryPrompt);
+        const parsedReport = safeParseJsonReport(response.text);
+        if (!parsedReport) {
+          console.error('Failed to parse AI report:', response.text);
+          reportPayload = buildFallbackStudyRoomReport({
+            roomId,
+            conversationId: room.conversation_id,
+            mission: room.mission,
+            transcriptLines,
+          });
+        } else {
+          reportPayload = normalizeStudyRoomReport({
+            room_id: roomId,
+            conversation_id: room.conversation_id,
+            summary: parsedReport.summary,
+            squad_score: parsedReport.squad_score,
+            key_learnings: parsedReport.key_learnings,
+            highlights: parsedReport.highlights,
+            recommendations: parsedReport.recommendations,
+          });
+        }
+      } catch (aiError) {
+        console.error('AI room report generation failed, using fallback report:', aiError);
+        reportPayload = buildFallbackStudyRoomReport({
+          roomId,
+          conversationId: room.conversation_id,
+          mission: room.mission,
+          transcriptLines,
+        });
+      }
     }
 
-    // 4. Save report and Close room
-    const { data: report, error: reportError } = await supabaseAdmin
+    const { data: existingReport } = await supabaseAdmin
       .from('study_room_reports')
-      .upsert({
-        room_id: roomId,
-        conversation_id: room.conversation_id,
-        summary: reportData.summary,
-        squad_score: reportData.squad_score,
-        key_learnings: reportData.key_learnings,
-        highlights: reportData.highlights,
-        recommendations: reportData.recommendations
-      }, { onConflict: 'room_id' })
+      .select('id')
+      .eq('room_id', roomId)
+      .maybeSingle();
+
+    const reportQuery = existingReport
+      ? supabaseAdmin
+          .from('study_room_reports')
+          .update(reportPayload)
+          .eq('id', existingReport.id)
+      : supabaseAdmin
+          .from('study_room_reports')
+          .insert(reportPayload);
+
+    const { data: report, error: reportError } = await reportQuery
       .select()
       .single();
 

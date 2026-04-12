@@ -20,9 +20,11 @@ import {
   History,
   ShieldCheck,
   Users,
+  Archive,
 } from "lucide-react";
 import type { Conversation, StudyRoomPreview } from "@/types";
 import { groupConversationsByDate, cn } from "@/lib/utils";
+import { getStudyRoomStatusMeta } from "@/lib/study-room-data";
 import PromoCodeModal from "@/components/modals/PromoCodeModal";
 import SettingsModal from "@/components/modals/SettingsModal";
 import HelpModal from "@/components/modals/HelpModal";
@@ -99,6 +101,42 @@ export default function Sidebar({
   const [helpModalOpen, setHelpModalOpen] = useState(false);
   const [rayaCardModalOpen, setRayaCardModalOpen] = useState(false);
   const [showLevelUpHint, setShowLevelUpHint] = useState(false);
+  const [confirmingDeleteId, setConfirmingDeleteId] = useState<string | null>(null);
+  const [confirmingRoomId, setConfirmingRoomId] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (confirmingDeleteId) {
+      const timer = setTimeout(() => setConfirmingDeleteId(null), 3000);
+      return () => clearTimeout(timer);
+    }
+  }, [confirmingDeleteId]);
+
+  useEffect(() => {
+    if (confirmingRoomId) {
+      const timer = setTimeout(() => setConfirmingRoomId(null), 3000);
+      return () => clearTimeout(timer);
+    }
+  }, [confirmingRoomId]);
+
+  const handleDeleteClick = (e: React.MouseEvent, id: string) => {
+    e.stopPropagation();
+    if (confirmingDeleteId === id) {
+      onDeleteConversation?.(id);
+      setConfirmingDeleteId(null);
+    } else {
+      setConfirmingDeleteId(id);
+    }
+  };
+
+  const handleRemoveRoomClick = (e: React.MouseEvent, id: string) => {
+    e.stopPropagation();
+    if (confirmingRoomId === id) {
+      onRemoveRoom?.(id);
+      setConfirmingRoomId(null);
+    } else {
+      setConfirmingRoomId(id);
+    }
+  };
 
   useEffect(() => {
     setMounted(true);
@@ -169,11 +207,6 @@ export default function Sidebar({
 
   const handleSelectConversation = (id: string) => {
     onSelectConversation?.(id);
-  };
-
-  const handleDeleteClick = (e: React.MouseEvent, id: string) => {
-    e.stopPropagation();
-    onDeleteConversation?.(id);
   };
 
   return (
@@ -314,20 +347,12 @@ export default function Sidebar({
               )}
 
               {hasRooms && (() => {
-                // Determine active rooms: currently selected + previous active rooms 
-                // In a real app, this would come from a server-side "active_sessions" state.
-                // For now, we simulate: up to 2 rooms can be "Active".
-                // The current activeRoomId is always one of them.
-                const openedRoomIds = rooms.slice(0, 2).map(r => r.id);
-                if (activeRoomId && !openedRoomIds.includes(activeRoomId)) {
-                  openedRoomIds[1] = activeRoomId; // Force current room into the active slots
-                }
-
                 return filteredRooms.map((room) => {
                   const isActiveViewId = activeRoomId === room.id;
-                  const isOpened = openedRoomIds.includes(room.id);
-                  const isFull = room.onlineCount >= 8;
-                  
+                  const statusMeta = getStudyRoomStatusMeta(room);
+                  const isFull = statusMeta.status === "full";
+                  const isClosed = statusMeta.status === "closed";
+                   
                   return (
                     <div
                       key={room.id}
@@ -339,12 +364,12 @@ export default function Sidebar({
                         onSelectRoom?.(room.id);
                       }}
                       className={cn(
-                        "mx-2 mb-2 cursor-pointer rounded-[20px] border px-4 py-3 transition-all relative overflow-hidden",
+                        "group mx-2 mb-2 cursor-pointer rounded-[20px] border px-4 py-3 transition-all relative overflow-hidden",
                         isActiveViewId
                           ? "border-indigo-200 bg-white shadow-sm ring-2 ring-indigo-50"
-                          : isOpened
+                          : statusMeta.status === "live"
                             ? "border-slate-200 bg-slate-50/50 hover:bg-slate-50"
-                            : "border-transparent bg-transparent hover:bg-indigo-50/40 grayscale-[0.6] opacity-60"
+                            : "border-transparent bg-transparent opacity-70"
                       )}
                     >
                       <div className="flex items-start justify-between gap-3">
@@ -357,34 +382,33 @@ export default function Sidebar({
                         </div>
                         
                         <div className="flex flex-col items-end gap-1">
-                          {isFull ? (
+                          {statusMeta.status === "full" ? (
                             <span className="rounded-lg bg-orange-100 px-2 py-0.5 text-[10px] font-black text-orange-600 uppercase tracking-tight">Full</span>
-                          ) : !isOpened ? (
-                            <div className="flex flex-col items-end gap-1">
-                              <span className="rounded-lg bg-red-100 px-2 py-0.5 text-[10px] font-black text-red-600 uppercase tracking-tight">Closed</span>
-                            </div>
+                          ) : statusMeta.status === "closed" ? (
+                            <span className="rounded-lg bg-slate-200 px-2 py-0.5 text-[10px] font-black text-slate-600 uppercase tracking-tight">Closed</span>
                           ) : (
                             <div className={cn(
                               "rounded-lg px-2 py-0.5",
                               isActiveViewId ? "bg-indigo-600 text-white" : "bg-indigo-50 text-indigo-600"
                             )}>
-                              <p className="text-[10px] font-black">{room.onlineCount}/8</p>
+                              <p className="text-[10px] font-black">{statusMeta.detail}</p>
                             </div>
                           )}
                         </div>
                         
                         {/* Remove button for rooms */}
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            onRemoveRoom?.(room.id);
-                          }}
-                          className={cn(
-                            "absolute right-2 top-2 z-10 shrink-0 rounded-lg p-1.5 transition-all opacity-0 group-hover:opacity-100 hover:bg-red-50 hover:text-red-500 text-slate-400"
-                          )}
-                          title="Remove from history"
+                         <button
+                           onClick={(e) => handleRemoveRoomClick(e, room.id)}
+                           className={cn(
+                             "absolute right-2 top-2 z-10 inline-flex shrink-0 items-center gap-1 rounded-full border px-2.5 py-1 text-[10px] font-black uppercase tracking-wide transition-all outline-none",
+                             confirmingRoomId === room.id
+                               ? "bg-red-500 text-white border-red-500 opacity-100 shadow-sm"
+                               : "border-slate-200 bg-white/95 text-slate-500 opacity-0 group-hover:opacity-100 hover:border-slate-300 hover:bg-slate-50 hover:text-slate-700"
+                           )}
+                           title="Hide from room history"
                         >
-                          <Trash2 className="w-3.5 h-3.5" />
+                          <Archive className="w-3 h-3" />
+                          {confirmingRoomId === room.id ? "Cacher?" : "Hide"}
                         </button>
                       </div>
                     </div>
@@ -440,11 +464,23 @@ export default function Sidebar({
                         <button
                           onClick={(e) => handleDeleteClick(e, conversation.id)}
                           className={cn(
-                            "shrink-0 rounded-lg p-1.5 transition-all opacity-0 group-hover:opacity-100 hover:bg-red-50 hover:text-red-500 text-slate-300",
-                            isActive && "opacity-100"
+                            "group/delete relative shrink-0 rounded-lg px-2 py-1.5 transition-all outline-none",
+                            isActive ? "opacity-100" : "opacity-0 group-hover:opacity-100",
+                            confirmingDeleteId === conversation.id
+                              ? "bg-red-500 text-white hover:bg-red-600 scale-105 shadow-sm"
+                              : "hover:bg-red-50 hover:text-red-500 text-slate-300"
                           )}
                         >
-                          <Trash2 className="w-3.5 h-3.5" />
+                          <div className="flex items-center gap-1.5">
+                            {confirmingDeleteId === conversation.id ? (
+                              <>
+                                <Trash2 className="w-3.5 h-3.5" />
+                                <span className="text-[10px] font-black uppercase">Supprimer?</span>
+                              </>
+                            ) : (
+                              <Trash2 className="w-3.5 h-3.5" />
+                            )}
+                          </div>
                         </button>
                       </div>
                     );

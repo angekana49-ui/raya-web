@@ -33,6 +33,7 @@ export interface RayaConfig {
   topP?: number;
   reasoningEffort?: string; // For reasoning models (e.g. Groq gpt-oss): "low" | "medium" | "high"
   enableTools?: boolean; // Enable Gemini tools (urlContext, codeExecution, googleSearch)
+  systemPrompt?: string;
   systemPromptPath?: string;
   studentContext?: string; // Dynamic per-user context appended after the static prompt
 }
@@ -97,11 +98,18 @@ export interface ProgressionState {
 
 interface GeminiCacheEntry { name: string; model: string; expiresAt: number; }
 
-let _staticPromptText: string | null = null;
-let _geminiCache: GeminiCacheEntry | null = null;
+const _staticPromptText = new Map<string, string>();
+const _geminiCache = new Map<string, GeminiCacheEntry>();
 let _cachingDisabled = false;            // set after first 429 to skip all future attempts
 const CACHE_TTL_SECONDS = 3600;          // 1 h
 const CACHE_REFRESH_MS  = 5 * 60 * 1000; // refresh 5 min before expiry
+const PROMPT_CONTEXT_MARKERS = [
+  '## 14. LIVE STUDENT CONTEXT — INJECTED EACH SESSION',
+  '## 14. ROOM CONTEXT - INJECTED EACH SESSION',
+  '## 14. ROOM CONTEXT — INJECTED EACH SESSION',
+  '## 14. LIVE STUDENT CONTEXT',
+  '## 14. ROOM CONTEXT',
+];
 
 // ============================================================================
 // RAYA AI SERVICE - DUAL PROVIDER
@@ -111,13 +119,14 @@ export class RayaAIService {
   private provider: AIProvider;
   private geminiClient?: GoogleGenAI;
   private openaiClient?: OpenAI;
-  private config: Required<Omit<RayaConfig, 'provider' | 'baseURL' | 'thinkingBudget' | 'thinkingLevel' | 'topP' | 'reasoningEffort' | 'enableTools' | 'studentContext'>> & {
+  private config: Required<Omit<RayaConfig, 'provider' | 'baseURL' | 'thinkingBudget' | 'thinkingLevel' | 'topP' | 'reasoningEffort' | 'enableTools' | 'studentContext' | 'systemPrompt'>> & {
     baseURL?: string;
     thinkingBudget?: number;
     thinkingLevel?: string;
     topP?: number;
     reasoningEffort?: string;
     enableTools?: boolean;
+    systemPrompt?: string;
     studentContext?: string;
   };
   private systemPrompt: string;
@@ -137,6 +146,7 @@ export class RayaAIService {
       topP: config.topP || 0.85,
       reasoningEffort: config.reasoningEffort,
       enableTools: config.enableTools ?? false,
+      systemPrompt: config.systemPrompt,
       systemPromptPath: config.systemPromptPath || path.join(process.cwd(), 'prompts/RAYA_v3.0_SYSTEM_PROMPT.md'),
     };
 
@@ -162,27 +172,33 @@ export class RayaAIService {
   private loadSystemPrompt(): string {
     let prompt: string;
 
-    // 1. Try Environment Variable (Production/Secure fallback)
-    if (process.env.RAYA_SYSTEM_PROMPT) {
+    // 1. Explicit prompt passed by caller (highest priority)
+    if (this.config.systemPrompt && !this.config.systemPrompt.includes('$(') && this.config.systemPrompt.length > 200) {
+      prompt = this.config.systemPrompt;
+    } else if (process.env.RAYA_SYSTEM_PROMPT && process.env.RAYA_SYSTEM_PROMPT.length > 200 && !process.env.RAYA_SYSTEM_PROMPT.includes('$(')) {
+      // 2. Try Environment Variable (Production/Secure fallback)
       prompt = process.env.RAYA_SYSTEM_PROMPT;
     } else {
-      // 2. Try Local File (Development/Configurable default)
+      // 3. Try Local File (Development/Configurable default)
       try {
         prompt = fs.readFileSync(this.config.systemPromptPath, 'utf-8');
       } catch (error) {
         console.warn('System prompt file not found at:', this.config.systemPromptPath);
-        throw new Error('System prompt not found in Environment (RAYA_SYSTEM_PROMPT) or File. Deploy will fail without it.');
+        // FINAL FALLBACK: Hardcoded core persona to prevent total failure
+        prompt = `You are RAYA, a brilliant female AI academic coach.
+Your goal is to help students learn by themselves using the Socratic method.
+Never solve problems directly. Guide them, probe their understanding, and teach only the missing gaps.
+Stay warm, encouraging, and direct. Use LaTeX for math ($...$).`;
       }
     }
 
     if (this.config.studentContext) {
       // Replace the placeholder section 14 with the real live context
-      const marker = '## 14. LIVE STUDENT CONTEXT — INJECTED EACH SESSION';
-      const idx = prompt.indexOf(marker);
-      if (idx !== -1) {
-        prompt = prompt.slice(0, idx) + this.config.studentContext;
+      const marker = PROMPT_CONTEXT_MARKERS.find((candidate) => prompt.includes(candidate));
+      if (marker) {
+        prompt = prompt.slice(0, prompt.indexOf(marker)) + this.config.studentContext;
       } else {
-        prompt += '\n\n' + this.config.studentContext;
+        prompt += `\n\n[CONTEXT]\n${this.config.studentContext}`;
       }
     }
     return prompt;
@@ -192,19 +208,33 @@ export class RayaAIService {
   // CONTEXT CACHING — static prompt (§1–13) cached on Gemini servers
   // ==========================================================================
 
+  private getPromptCacheKey(): string {
+    if (this.config.systemPrompt) {
+      return `inline:${this.config.systemPrompt.length}:${this.config.systemPrompt.slice(0, 120)}`;
+    }
+    return `file:${this.config.systemPromptPath}`;
+  }
+
   /** Returns the static portion of the system prompt (everything before §14). */
   private loadStaticPrompt(): string {
-    if (_staticPromptText) return _staticPromptText;
+    const promptCacheKey = this.getPromptCacheKey();
+    const cachedPrompt = _staticPromptText.get(promptCacheKey);
+    if (cachedPrompt) return cachedPrompt;
     let raw: string;
-    try {
-      raw = fs.readFileSync(this.config.systemPromptPath, 'utf-8');
-    } catch {
-      throw new Error('System prompt file not found');
+    if (this.config.systemPrompt) {
+      raw = this.config.systemPrompt;
+    } else {
+      try {
+        raw = fs.readFileSync(this.config.systemPromptPath, 'utf-8');
+      } catch {
+        throw new Error('System prompt file not found');
+      }
     }
-    const marker = '## 14. LIVE STUDENT CONTEXT';
-    const idx = raw.indexOf(marker);
-    _staticPromptText = idx !== -1 ? raw.slice(0, idx).trimEnd() : raw;
-    return _staticPromptText;
+    const marker = PROMPT_CONTEXT_MARKERS.find((candidate) => raw.includes(candidate));
+    const idx = marker ? raw.indexOf(marker) : -1;
+    const staticPrompt = idx !== -1 ? raw.slice(0, idx).trimEnd() : raw;
+    _staticPromptText.set(promptCacheKey, staticPrompt);
+    return staticPrompt;
   }
 
   /**
@@ -219,12 +249,14 @@ export class RayaAIService {
     if (this.config.enableTools) return null;
 
     const now = Date.now();
+    const promptCacheKey = `${this.getPromptCacheKey()}:${this.config.model}`;
+    const existingCache = _geminiCache.get(promptCacheKey);
     if (
-      _geminiCache &&
-      _geminiCache.model === this.config.model &&
-      _geminiCache.expiresAt > now + CACHE_REFRESH_MS
+      existingCache &&
+      existingCache.model === this.config.model &&
+      existingCache.expiresAt > now + CACHE_REFRESH_MS
     ) {
-      return _geminiCache.name;
+      return existingCache.name;
     }
 
     try {
@@ -236,13 +268,13 @@ export class RayaAIService {
           ttl: `${CACHE_TTL_SECONDS}s`,
         },
       });
-      _geminiCache = {
+      _geminiCache.set(promptCacheKey, {
         name: cache.name as string,
         model: this.config.model,
         expiresAt: now + CACHE_TTL_SECONDS * 1000,
-      };
+      });
       console.log(`[RAYA] Gemini cache created: ${cache.name}`);
-      return _geminiCache.name;
+      return cache.name as string;
     } catch (err: any) {
       _cachingDisabled = true;
       console.warn('[RAYA] Context caching disabled (quota/unsupported), using inline prompt');

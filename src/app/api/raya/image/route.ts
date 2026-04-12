@@ -8,6 +8,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { RayaAIService, ProgressionState, AIProvider } from '@/services/raya-ai.service';
+import { assertUsageWithinLimits, estimateTextTokens, recordUsage } from '@/services/usage-limits.service';
 import { resolveUserId } from '@/lib/auth';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -90,6 +91,11 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    await assertUsageWithinLimits(userId, {
+      estimatedInputTokens: estimateTextTokens(message),
+      requestedFileUploads: 1,
+    });
+
     // Parse JSON fields
     const progressionState = progressionStateStr
       ? JSON.parse(progressionStateStr)
@@ -133,6 +139,11 @@ export async function POST(req: NextRequest) {
         progressionState as ProgressionState | undefined
       );
     }
+
+    await recordUsage(userId, {
+      tokensUsed: estimateTextTokens(message) + estimateTextTokens(response.text),
+      fileUploadsUsed: 1,
+    });
 
     // Return response
     return NextResponse.json({

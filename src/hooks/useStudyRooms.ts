@@ -4,12 +4,13 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import type { StudyRoomPreview } from "@/types";
 import { supabase } from "@/lib/supabase/client";
 import {
+  buildInvitedRoomPreview,
   findStudyRoomByInviteCode,
   getSelectedRoom,
   getStudyRoomTheme,
   type StudyRoomTheme,
 } from "@/lib/study-room-data";
-import { createStudyRoom, getActiveRooms, getStudyRoom, mapStudyRoomRow } from "@/services/study-rooms.service";
+import { createStudyRoom, getActiveRooms, mapStudyRoomRow, uploadRoomFiles } from "@/services/study-rooms.service";
 
 type UseStudyRoomsOptions = {
   authLoading: boolean;
@@ -42,7 +43,9 @@ type UseStudyRoomsResult = {
   clearInvitedGuestFlow: () => void;
   handleCreateRoom: (payload: { title: string; mission: string; duration: number; aiMode: "passive" | "active"; files: File[] }) => void;
   handleJoinRoom: (inviteCode: string) => void;
-  handleRemoveRoom: (roomId: string) => void;
+  handleRemoveRoom: (id: string) => void;
+  roomError: string | null;
+  clearRoomError: () => void;
   userId?: string | null;
 };
 
@@ -61,15 +64,43 @@ export function useStudyRooms({
   const [invitedGuestFlow, setInvitedGuestFlow] = useState(false);
   const [invitedGuestAlias, setInvitedGuestAlias] = useState("Guest learner");
   const [roomOnboardingNudgeVisible, setRoomOnboardingNudgeVisible] = useState(false);
-  const [hiddenRooms, setHiddenRooms] = useState<string[]>([]);
+  const [removedRoomIds, setRemovedRoomIds] = useState<string[]>([]);
+  const [roomError, setRoomError] = useState<string | null>(null);
 
-  // Load hidden rooms from local storage
   useEffect(() => {
-    try {
-      const stored = localStorage.getItem("raya_hidden_rooms");
-      if (stored) setHiddenRooms(JSON.parse(stored));
-    } catch {}
+    const saved = localStorage.getItem("removed_study_rooms");
+    if (saved) {
+      try {
+        setRemovedRoomIds(JSON.parse(saved));
+      } catch (e) {
+        console.error("Failed to parse removed rooms", e);
+      }
+    }
   }, []);
+
+  const handleRemoveRoom = useCallback((id: string) => {
+    setRemovedRoomIds((prev) => {
+      if (prev.includes(id)) return prev;
+      const next = [...prev, id];
+      localStorage.setItem("removed_study_rooms", JSON.stringify(next));
+      return next;
+    });
+    if (activeRoomIdState === id) {
+      setActiveRoomIdState(null);
+    }
+  }, [activeRoomIdState]);
+
+  const clearRoomError = useCallback(() => setRoomError(null), []);
+
+  const visibleRooms = useMemo(() => {
+    const seen = new Set<string>();
+    return studyRooms.filter((room) => {
+      if (removedRoomIds.includes(room.id)) return false;
+      if (seen.has(room.id)) return false;
+      seen.add(room.id);
+      return true;
+    });
+  }, [studyRooms, removedRoomIds]);
 
   // Load rooms from Supabase
   useEffect(() => {
@@ -98,16 +129,25 @@ export function useStudyRooms({
           if (!row?.id) return;
 
           const mapped = mapStudyRoomRow(row);
-          if (row.is_active === false) {
-            setStudyRooms((prev) => prev.filter((room) => room.id !== row.id));
-            return;
-          }
-
+          
           setStudyRooms((prev) => {
             const index = prev.findIndex((room) => room.id === mapped.id);
-            if (index === -1) return [mapped, ...prev];
+            if (index === -1) {
+              // If it's inactive from the start, we might not want to add it to 'live' list 
+              // unless it's the one we are currently looking at
+              if (row.is_active === false && mapped.id !== activeRoomIdState) {
+                return prev;
+              }
+              return [mapped, ...prev];
+            }
+            
             const next = [...prev];
-            next[index] = { ...next[index], ...mapped };
+            // If it becomes inactive and it's NOT the one we are looking at, remove it
+            if (row.is_active === false && mapped.id !== activeRoomIdState) {
+              next.splice(index, 1);
+            } else {
+              next[index] = { ...next[index], ...mapped };
+            }
             return next;
           });
         },
@@ -140,35 +180,18 @@ export function useStudyRooms({
 
     if (!roomInvite) return;
 
-    async function resolveAndJoin() {
-      const invite = roomInvite as string;
-      const existing = studyRooms.find((r) => r.id === invite);
-      if (existing) {
-        setActiveViewState("rooms");
-        setActiveRoomIdState(existing.id);
-        return;
-      }
+    const joinedRoom =
+      findStudyRoomByInviteCode(studyRooms, roomInvite) ?? buildInvitedRoomPreview(roomInvite);
 
-      const room = await getStudyRoom(invite);
-      if (room) {
-        setStudyRooms((prev) => {
-          if (prev.some((r) => r.id === room.id)) return prev;
-          return [room, ...prev];
-        });
-        setActiveViewState("rooms");
-        setActiveRoomIdState(room.id);
-        setInvitedGuestFlow(true);
-        setInvitedGuestAlias("Guest learner");
-        setRoomOnboardingNudgeVisible(!authLoading && (!isSignedIn || !isProfileComplete));
-      } else {
-        // Redirection with alert-trigger (handled by parent or via URL param)
-        window.history.replaceState(null, "", "/?error=room_expired");
-        setActiveViewState("chat");
-        // We'll trust the parent to show the alert based on the URL param or state.
-      }
-    }
-
-    resolveAndJoin();
+    setStudyRooms((prev) => {
+      if (prev.some((room) => room.id === joinedRoom.id)) return prev;
+      return [joinedRoom, ...prev];
+    });
+    setActiveViewState("rooms");
+    setActiveRoomIdState(joinedRoom.id);
+    setInvitedGuestFlow(true);
+    setInvitedGuestAlias("Guest learner");
+    setRoomOnboardingNudgeVisible(!authLoading && (!isSignedIn || !isProfileComplete));
   }, [authLoading, isProfileComplete, isSignedIn, studyRooms]);
 
   useEffect(() => {
@@ -179,8 +202,8 @@ export function useStudyRooms({
   }, [authLoading, isProfileComplete, isSignedIn]);
 
   const selectedRoom = useMemo(
-    () => getSelectedRoom(studyRooms, activeRoomIdState ?? studyRooms[0]?.id ?? ""),
-    [activeRoomIdState, studyRooms],
+    () => getSelectedRoom(visibleRooms, activeRoomIdState ?? visibleRooms[0]?.id ?? ""),
+    [activeRoomIdState, visibleRooms],
   );
 
   const selectedRoomTheme = useMemo(
@@ -221,81 +244,63 @@ export function useStudyRooms({
     }));
 
     try {
-      // userId is now resolved inside the service via get_db_user_id() RPC
+      // 1. Create the room
       const session = await createStudyRoom({
         title: payload.title,
         mission: payload.mission,
         duration: payload.duration,
         aiMode: payload.aiMode,
-        files: attachedFiles
+        files: [] // We'll use the room_files table instead
       });
+
+      // 2. Upload files if any
+      if (payload.files.length > 0) {
+        await uploadRoomFiles(session.id, payload.files);
+      }
 
       const createdRoom: StudyRoomPreview = {
         ...mapStudyRoomRow(session),
         vibe: "Fresh room",
       };
 
-      setStudyRooms((prev) => [createdRoom, ...prev]);
+      setStudyRooms((prev) => {
+        // Double check against race conditions with realtime subscription
+        if (prev.some(r => r.id === createdRoom.id)) return prev;
+        return [createdRoom, ...prev];
+      });
       setActiveViewState("rooms");
       setActiveRoomIdState(createdRoom.id);
       setCreateRoomModalOpen(false);
     } catch (err) {
       console.error('Failed to create room in DB:', err);
+      setRoomError("Could not create study room. Please try again.");
     }
   }, []);
 
-  const handleJoinRoom = useCallback(async (inviteCode: string) => {
-    const existing = studyRooms.find((r) => r.id === inviteCode);
-    if (existing) {
-      setActiveViewState("rooms");
-      setActiveRoomIdState(existing.id);
-      setJoinRoomModalOpen(false);
-      return;
-    }
+  const handleJoinRoom = useCallback((inviteCode: string) => {
+    const joinedRoom =
+      findStudyRoomByInviteCode(studyRooms, inviteCode) ?? buildInvitedRoomPreview(inviteCode);
 
-    const room = await getStudyRoom(inviteCode);
-    if (room) {
-      setStudyRooms((prev) => {
-        if (prev.some((r) => r.id === room.id)) return prev;
-        return [room, ...prev];
-      });
-      setActiveViewState("rooms");
-      setActiveRoomIdState(room.id);
-      setJoinRoomModalOpen(false);
+    setStudyRooms((prev) => {
+      if (prev.some((room) => room.id === joinedRoom.id)) return prev;
+      return [joinedRoom, ...prev];
+    });
+    setActiveViewState("rooms");
+    setActiveRoomIdState(joinedRoom.id);
+    setJoinRoomModalOpen(false);
 
-      if (!authLoading && (!isSignedIn || !isProfileComplete)) {
-        setInvitedGuestFlow(true);
-        setInvitedGuestAlias("Guest learner");
-        setRoomOnboardingNudgeVisible(false);
-      }
-    } else {
-      alert("This room link is invalid or has expired. Redirecting to lobby...");
-      setJoinRoomModalOpen(false);
-      setActiveViewState("chat");
+    if (!authLoading && (!isSignedIn || !isProfileComplete)) {
+      setInvitedGuestFlow(true);
+      setInvitedGuestAlias("Guest learner");
+      setRoomOnboardingNudgeVisible(false);
     }
   }, [authLoading, isProfileComplete, isSignedIn, studyRooms]);
-
-  const handleRemoveRoom = useCallback((roomId: string) => {
-    setHiddenRooms((prev) => {
-      const next = [...prev, roomId];
-      try { localStorage.setItem("raya_hidden_rooms", JSON.stringify(next)); } catch {}
-      return next;
-    });
-    if (activeRoomIdState === roomId) {
-      setActiveViewState("chat");
-      setActiveRoomIdState(null);
-    }
-  }, [activeRoomIdState]);
-
-  const visibleStudyRooms = useMemo(() => {
-    return studyRooms.filter(r => !hiddenRooms.includes(r.id));
-  }, [studyRooms, hiddenRooms]);
 
   return {
     activeView: activeViewState,
     setActiveView,
     activeRoomId: activeRoomIdState,
-    setActiveRoomId: setActiveRoomIdState,
+    setActiveRoomId,
     createRoomModalOpen,
     setCreateRoomModalOpen,
     joinRoomModalOpen,
@@ -305,14 +310,16 @@ export function useStudyRooms({
     invitedGuestFlow,
     invitedGuestAlias,
     roomOnboardingNudgeVisible,
-    studyRooms: visibleStudyRooms,
-    selectedRoom: selectedRoom!,
-    selectedRoomTheme: selectedRoomTheme!,
+    studyRooms: visibleRooms,
+    selectedRoom,
+    selectedRoomTheme,
     openInvitedGuestOnboarding,
     registerInvitedGuestEngagement,
     clearInvitedGuestFlow,
     handleCreateRoom,
     handleJoinRoom,
     handleRemoveRoom,
+    roomError,
+    clearRoomError,
   };
 }
