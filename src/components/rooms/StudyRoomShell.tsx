@@ -6,7 +6,7 @@ import { ChevronDown, ChevronRight, Menu, Swords, UserPlus, Users, Sparkles } fr
 import ChatInput from "@/components/chat/ChatInput";
 import RoomMessageBubble from "@/components/rooms/RoomMessageBubble";
 import { cn } from "@/lib/utils";
-import type { AttachedFile } from "@/types";
+import type { AttachedFile, AlertKind } from "@/types";
 import type { UserEntitlements } from "@/lib/user-entitlements";
 import RoomAIOptionsMenu from "@/components/menus/RoomAIOptionsMenu";
 import ModelPickerMenu from "@/components/menus/ModelPickerMenu";
@@ -1072,6 +1072,7 @@ export default function StudyRoomShell({
           onSelectModel={handleModelChange}
           entitlements={DEFAULT_USER_ENTITLEMENTS}
           anchorEl={anchors.modelButton}
+          changesRemaining={changesRemaining}
         />
       </div>
 

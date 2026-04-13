@@ -73,3 +73,5 @@ export interface ChatMode {
 }
 
 export type AIOptionId = "normal" | "rush-mode" | "deep-thinking" | "creative-mode";
+
+export type AlertKind = "5m" | "2m" | "end";
