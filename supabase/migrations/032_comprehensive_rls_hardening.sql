@@ -19,9 +19,9 @@ ALTER TABLE public.users ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS "Anyone can view active rooms" ON public.study_rooms;
 DROP POLICY IF EXISTS "Creators can manage their rooms" ON public.study_rooms;
 
--- SELECT: Authenticated users can view active rooms AND creators can view their own rooms (even inactive)
+-- SELECT: Anyone (even anon guests) can view active rooms, creators can view all their rooms
 CREATE POLICY "study_rooms_select" ON public.study_rooms
-  FOR SELECT TO authenticated
+  FOR SELECT
   USING (
     is_active = true
     OR created_by IN (SELECT id FROM public.users WHERE auth_user_id = auth.uid())
@@ -74,20 +74,20 @@ CREATE POLICY "conversations_all" ON public.conversations
 DROP POLICY IF EXISTS "own_messages" ON public.messages;
 DROP POLICY IF EXISTS "active_study_room_messages_read" ON public.messages;
 
--- SELECT: Owner of conversation OR any authenticated user if the conversation is an active study room
+-- SELECT: Owner of conversation OR anyone (even anon guests) if the conversation is an active study room
 CREATE POLICY "messages_select" ON public.messages
-  FOR SELECT TO authenticated
+  FOR SELECT
   USING (
-    auth.uid() IS NOT NULL
-    AND (
-      -- 1. Conversation Owner
-      conversation_id IN (
+    (
+      auth.uid() IS NOT NULL AND conversation_id IN (
         SELECT c.id FROM public.conversations c 
         JOIN public.users u ON u.id = c.user_id 
         WHERE u.auth_user_id = auth.uid()
       )
-      OR
-      -- 2. Tied to an ACTIVE study room
+    )
+    OR
+    (
+      -- Tied to an ACTIVE study room (public preview)
       conversation_id IN (
         SELECT sr.conversation_id FROM public.study_rooms sr 
         WHERE sr.is_active = true AND sr.conversation_id IS NOT NULL
@@ -123,10 +123,10 @@ CREATE POLICY "messages_mutation" ON public.messages
 DROP POLICY IF EXISTS "own_profile" ON public.users;
 DROP POLICY IF EXISTS "users_read_all" ON public.users;
 
--- SELECT: Authenticated users can read basic profiles (needed for room presence & chat avatars)
+-- SELECT: Anyone (even anon guests) can read basic profiles (needed for room presence & chat avatars)
 CREATE POLICY "users_select" ON public.users
-  FOR SELECT TO authenticated
-  USING (auth.uid() IS NOT NULL);
+  FOR SELECT
+  USING (true);
 
 -- UPDATE: Only modify your own profile
 CREATE POLICY "users_update" ON public.users
