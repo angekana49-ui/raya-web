@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { ChevronRight, Loader2, Globe, ChevronDown } from "lucide-react";
+import { ChevronRight, Loader2, Globe, ChevronDown, X } from "lucide-react";
 import { NoTranslate } from "@/components/ui/NoTranslate";
 import TurnstileWidget from "@/components/security/TurnstileWidget";
 import { languages, changeLanguage } from "@/components/menus/LanguageMenu";
@@ -41,7 +41,8 @@ interface OnboardingModalProps {
     schoolLevel: string;
     captchaToken?: string;
   }) => void;
-  onOpenRayaCard?: () => void;
+  onClose?: () => void;
+  onOpenRecovery?: () => void;
 }
 
 export default function OnboardingModal({
@@ -53,7 +54,8 @@ export default function OnboardingModal({
   error = null,
   turnstileSiteKey,
   onComplete,
-  onOpenRayaCard,
+  onClose,
+  onOpenRecovery,
 }: OnboardingModalProps) {
   const [displayName, setDisplayName] = useState(defaultName);
   const [username, setUsername] = useState(defaultUsername);
@@ -144,6 +146,14 @@ export default function OnboardingModal({
             className="fixed z-[80] left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-[94vw] max-w-[440px] max-h-[90vh] rounded-2xl border border-slate-200 bg-white shadow-xl overflow-hidden flex flex-col"
           >
             <div className="bg-[linear-gradient(135deg,#2563eb_0%,#7c3aed_100%)] px-6 pt-6 pb-5 shrink-0 relative">
+              {onClose && (
+                <button
+                  onClick={onClose}
+                  className="absolute left-4 top-4 w-7 h-7 flex items-center justify-center rounded-full bg-white/20 hover:bg-white/30 transition-colors"
+                >
+                  <X className="w-4 h-4 text-white" />
+                </button>
+              )}
               <div className="absolute right-4 top-4">
                 <div className="relative">
                   <button
@@ -198,11 +208,11 @@ export default function OnboardingModal({
                 </div>
               </div>
 
-              <div className="flex items-center gap-3 mb-1">
+              <div className={cn("flex items-center gap-3 mb-1", onClose ? "mt-4" : "")}>
                 <img src="/raya-logo.jpeg" alt="RAYA" className="w-8 h-8 rounded-lg object-cover" />
                 <span className="text-lg font-bold text-white"><NoTranslate>RAYA</NoTranslate></span>
               </div>
-              <h3 className="text-base font-bold text-white mt-2">Set up your student profile</h3>
+              <h3 className="text-base font-bold text-white mt-1">Set up your student profile</h3>
               <p className="text-xs text-blue-100 mt-0.5">
                 Pick a unique pseudo and your school level.
               </p>
@@ -320,15 +330,15 @@ export default function OnboardingModal({
                 )}
               >
                 {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <ChevronRight className="w-4 h-4" />}
-                Start with <NoTranslate>RAYA</NoTranslate>
+                <NoTranslate>Start with RAYA</NoTranslate>
               </button>
               
               <button 
-                onClick={onOpenRayaCard}
-                className="text-xs font-semibold text-indigo-600 hover:text-indigo-800 transition-colors"
+                onClick={onOpenRecovery}
+                className="text-xs font-semibold text-indigo-600 hover:text-indigo-800 transition-colors mt-1"
                 type="button"
               >
-                Restore existing account (Raya Card)
+                Sign up / Log in with Email or Recovery Key
               </button>
             </div>
           </motion.div>

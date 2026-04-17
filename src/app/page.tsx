@@ -35,8 +35,8 @@ import OnboardingModal from "@/components/modals/OnboardingModal";
 import PromoCodeModal from "@/components/modals/PromoCodeModal";
 import CreateRoomModal from "@/components/modals/CreateRoomModal";
 import JoinRoomModal from "@/components/modals/JoinRoomModal";
-import InviteRoomModal from "@/components/modals/InviteRoomModal";
 import { RayaCardModal } from "@/components/modals/RayaCardModal";
+import { LoginRecoveryModal } from "@/components/modals/LoginRecoveryModal";
 import { NoTranslate } from "@/components/ui/NoTranslate";
 import SmartPopup, { type SmartPopupContent } from "@/components/ui/SmartPopup";
 import { useGamification, getNetMessages } from "@/hooks/useGamification";
@@ -178,6 +178,9 @@ export default function Home() {
   const [onboardingLoading, setOnboardingLoading] = useState(false);
   const [onboardingError, setOnboardingError] = useState<string | null>(null);
   const [rayaCardModalOpen, setRayaCardModalOpen] = useState(false);
+  const [loginRecoveryModalOpen, setLoginRecoveryModalOpen] = useState(false);
+  const [previewExpiresAt, setPreviewExpiresAt] = useState<number | null>(null);
+  const [previewStarted, setPreviewStarted] = useState(false);
   const [promoModalOpen, setPromoModalOpen] = useState(false);
   const turnstileSiteKey = process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY ?? "";
 
@@ -347,18 +350,42 @@ export default function Home() {
   }, [user]);
 
   useEffect(() => {
-    if (authLoading || authModalVisible || rayaCardModalOpen) return;
-    if (invitedGuestFlow && !roomOnboardingNudgeVisible) {
+    // Keep onboarding hidden while auth modals or bypass active
+    if (authLoading || authModalVisible || rayaCardModalOpen || loginRecoveryModalOpen) return;
+    
+    // Auto-start preview timer for invited guests who haven't started yet
+    if (invitedGuestFlow && !roomOnboardingNudgeVisible && !previewStarted) {
+      setPreviewExpiresAt(Date.now() + 300_000);
+      setPreviewStarted(true);
+    }
+
+    // Determine current bypass state dynamically
+    const isPreviewActive = previewExpiresAt !== null && Date.now() < previewExpiresAt;
+
+    if (isPreviewActive) {
       setOnboardingVisible(false);
       return;
     }
+
     if (!user || !isProfileComplete) {
       setOnboardingVisible(true);
       return;
     }
+
     setOnboardingVisible(false);
     setOnboardingError(null);
-  }, [authLoading, authModalVisible, rayaCardModalOpen, invitedGuestFlow, isProfileComplete, roomOnboardingNudgeVisible, user]);
+  }, [authLoading, authModalVisible, rayaCardModalOpen, loginRecoveryModalOpen, invitedGuestFlow, isProfileComplete, roomOnboardingNudgeVisible, user, previewExpiresAt, previewStarted]);
+
+  // Effect to re-evaluate bypass timer every second
+  useEffect(() => {
+    if (!previewExpiresAt) return;
+    const interval = setInterval(() => {
+      if (Date.now() > previewExpiresAt) {
+        setPreviewExpiresAt(null);
+      }
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [previewExpiresAt]);
 
   useEffect(() => {
     const settings = readAppSettings();
@@ -1674,15 +1701,28 @@ export default function Home() {
           error={onboardingError}
           turnstileSiteKey={turnstileSiteKey}
           onComplete={handleCompleteOnboarding}
-          onOpenRayaCard={() => {
+          onClose={() => {
+             // 300s bypass when closing onboarding
+             setPreviewExpiresAt(Date.now() + 300_000);
+             setPreviewStarted(true);
+             setOnboardingVisible(false);
+          }}
+          onOpenRecovery={() => {
             setOnboardingVisible(false);
-            setRayaCardModalOpen(true);
+            setLoginRecoveryModalOpen(true);
           }}
         />
         <RayaCardModal 
           isOpen={rayaCardModalOpen} 
           onClose={() => setRayaCardModalOpen(false)} 
           defaultTab="restore" 
+        />
+        <LoginRecoveryModal
+          isOpen={loginRecoveryModalOpen}
+          onClose={() => setLoginRecoveryModalOpen(false)}
+          onOpenEmailAuth={() => {
+            setAuthModalVisible(true);
+          }}
         />
         <PromoCodeModal
           isOpen={promoModalOpen}
