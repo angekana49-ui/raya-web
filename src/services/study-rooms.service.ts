@@ -216,17 +216,33 @@ export async function createStudyRoom(payload: {
 }
 
 export async function getRoomMessages(conversationId: string) {
-  const { data, error } = await supabase.rpc('get_room_messages', {
-    p_conversation_id: conversationId,
-    p_limit: 200,
-  });
+  try {
+    const { data: { session } } = await supabase.auth.getSession();
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+    };
 
-  if (error) {
-    console.error('Error loading room messages:', error.message || error.code || error);
+    if (session?.access_token) {
+      headers.Authorization = `Bearer ${session.access_token}`;
+    }
+
+    const response = await fetch('/api/rooms/messages', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ conversationId }),
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text().catch(() => '');
+      throw new Error(errorText || `Room messages request failed with ${response.status}`);
+    }
+
+    const payload = await response.json();
+    return [...(payload?.data || [])].reverse();
+  } catch (error: any) {
+    console.error('Error loading room messages:', error?.message || error?.code || error);
     return [];
   }
-
-  return [...(data || [])].reverse();
 }
 
 export async function closeRoom(roomId: string) {
@@ -256,15 +272,9 @@ export async function advanceStudyRoomTimer(
 }
 
 export async function joinRoom(roomId: string) {
-  const dbUserId = await getDbUserId();
-  if (!dbUserId) return null;
-
-  // Upsert participation to trigger limits initialization
-  const { data, error } = await supabase
-    .from('study_room_participants')
-    .upsert({ room_id: roomId, user_id: dbUserId }, { onConflict: 'room_id, user_id' })
-    .select()
-    .single();
+  const { data, error } = await supabase.rpc('join_study_room', {
+    p_room_id: roomId,
+  });
 
   if (error) {
     console.error('Error joining room/tracking participant:', error.message || error.code || error);
@@ -278,6 +288,20 @@ export async function joinRoom(roomId: string) {
     throw new RoomJoinError('ROOM_JOIN_FAILED', 'Could not join this room right now.');
   }
   return data;
+}
+
+export async function syncRoomOnlineCount(roomId: string, onlineCount: number): Promise<number | null> {
+  const { data, error } = await supabase.rpc('sync_room_online_count', {
+    p_room_id: roomId,
+    p_online_count: onlineCount,
+  });
+
+  if (error) {
+    console.error('Failed to sync room online count:', error.message || error.code || error);
+    return null;
+  }
+
+  return typeof data === 'number' ? data : null;
 }
 
 export async function getRoomParticipant(roomId: string) {

@@ -158,11 +158,11 @@ export default function AIOptionsMenu({
           {/* Menu */}
           <motion.div
             ref={menuRef}
-            initial={{ opacity: 0, scale: 0.95, y: 20 }}
+            initial={{ opacity: 0, scale: 0.95, y: 10 }}
             animate={{ opacity: 1, scale: 1, y: 0 }}
-            exit={{ opacity: 0, scale: 0.95, y: 20 }}
+            exit={{ opacity: 0, scale: 0.95, y: 10 }}
             transition={{ type: "spring", damping: 20, stiffness: 300 }}
-            className="fixed w-[264px] md:w-[272px] max-w-[calc(100vw-16px)] bg-white/80 backdrop-blur-xl rounded-2xl p-3 shadow-[0_20px_50px_rgba(0,0,0,0.1)] border border-white/40 z-50"
+            className="fixed w-[200px] bg-white/90 backdrop-blur-xl rounded-2xl p-2 shadow-[0_20px_50px_rgba(0,0,0,0.1)] border border-white/40 z-50 overflow-hidden"
             style={{
               top: position.top,
               left: position.left,
@@ -171,43 +171,24 @@ export default function AIOptionsMenu({
             onClick={(e) => e.stopPropagation()}
           >
             {/* Header */}
-            <div className="flex items-center justify-between mb-3 px-1">
-              <h3 className="text-sm font-bold text-slate-900 tracking-tight">AI Modes</h3>
+            <div className="flex items-center justify-between mb-2 px-1 pt-0.5">
+              <h3 className="text-[11px] font-black text-slate-400 uppercase tracking-[0.15em]">AI Modes</h3>
               <button
                 onClick={onClose}
-                className="p-1.5 hover:bg-slate-100 rounded-full transition-colors text-slate-400"
+                className="p-1 hover:bg-slate-100 rounded-full transition-colors text-slate-300"
               >
-                <X className="w-4 h-4" />
+                <X className="w-3 h-3" />
               </button>
             </div>
 
-            {/* Access message */}
-            <div className="mb-3 p-3 bg-indigo-50/50 border border-indigo-100/50 rounded-xl">
-              <div className="flex items-start gap-2">
-                <Crown className="w-4 h-4 text-indigo-400 flex-shrink-0 mt-0.5" />
-                <div className="flex-1">
-                  <p className="text-[11px] text-indigo-700 font-bold leading-tight uppercase tracking-wider">
-                    Advanced Intelligence
-                  </p>
-                  <p className="text-xs text-indigo-500/80 mt-1 leading-snug">
-                    {entitlements.hasPremiumAccess
-                      ? "All advanced modes are active on this account."
-                      : entitlements.levelUpActive
-                        ? "Rush Mode is unlocked. Pro will add the deeper specialist modes later."
-                        : "Use a Level Up Code to unlock Rush Mode. Pro will unlock the full advanced stack."}
-                  </p>
-                </div>
-              </div>
-            </div>
-
-            {/* Modes grid */}
-            <div className="grid grid-cols-2 gap-2">
+            {/* Modes list (Compact single column) */}
+            <div className="space-y-1">
               {AI_OPTIONS.map((option) => {
                 const IconComponent = option.icon;
                 const isSelected = currentMode === option.id;
                 const lockType = getModeLockType(entitlements, option.id);
                 const isLocked = lockType !== null;
-                const badgeLabel = lockType === "level_up" ? "LEVEL UP" : lockType === "premium" ? "PRO" : null;
+                const badgeLabel = lockType === "level_up" ? "L.UP" : lockType === "premium" ? "PRO" : null;
 
                 return (
                   <button
@@ -220,52 +201,50 @@ export default function AIOptionsMenu({
                       handleLockedSelect(option.id, lockType);
                     }}
                     className={cn(
-                      "relative p-3 rounded-xl border transition-all text-left",
+                      "w-full flex items-center justify-between p-2 rounded-xl border transition-all text-left",
                       isLocked
-                        ? "border-slate-100 bg-slate-50/50 cursor-pointer"
+                        ? "border-slate-50 bg-slate-50/30 cursor-pointer opacity-60"
                         : isSelected
-                          ? "border-indigo-500 bg-indigo-500 text-white shadow-lg shadow-indigo-200"
-                          : "border-slate-100 bg-white/50 hover:border-indigo-200 hover:bg-white"
+                          ? "border-indigo-500 bg-indigo-500 text-white shadow-md shadow-indigo-100"
+                          : "border-transparent bg-transparent hover:bg-slate-50"
                     )}
                   >
-                    <div className="flex items-center justify-between mb-2">
+                    <div className="flex items-center gap-2 min-w-0">
                       <div
                         className={cn(
-                          "w-7 h-7 rounded-full flex items-center justify-center",
+                          "w-6 h-6 rounded-full flex items-center justify-center shrink-0",
                           isSelected ? "bg-white/20" : "bg-slate-100"
                         )}
                       >
                         <IconComponent
-                          className={cn("w-3.5 h-3.5", isSelected ? "text-white" : "text-slate-600")}
+                          className={cn("w-3 h-3", isSelected ? "text-white" : "text-slate-600")}
                           style={!isSelected && !isLocked ? { color: option.color } : {}}
                         />
                       </div>
-                      {isSelected && !isLocked && (
-                        <div className="w-4 h-4 rounded-full bg-white flex items-center justify-center shadow-sm">
-                          <Check className="w-2 h-2 text-indigo-600" />
-                        </div>
-                      )}
+                      <div className="min-w-0">
+                        <p className={cn(
+                          "text-[12px] font-bold leading-none truncate",
+                          isSelected ? "text-white" : "text-slate-900"
+                        )}>
+                          {option.label}
+                        </p>
+                      </div>
                     </div>
-                    <p
-                        className={cn(
-                          "text-[12px] font-bold tracking-tight",
-                          isSelected ? "text-white" : "text-slate-900",
-                          isLocked && "text-slate-500"
-                        )}
-                      >
-                        {option.label}
-                      </p>
+
+                    <div className="flex items-center gap-1.5 shrink-0">
                       {badgeLabel && (
-                        <span className="absolute top-2 right-2 px-1.5 py-0.5 bg-indigo-100 text-indigo-500 text-[9px] font-bold rounded uppercase">
+                        <span className={cn(
+                          "px-1.5 py-0.5 text-[8px] font-black rounded uppercase tracking-tighter",
+                          isSelected ? "bg-white/20 text-white" : "bg-indigo-50 text-indigo-500"
+                        )}>
                           {badgeLabel}
                         </span>
                       )}
-                      {isLocked && (
-                        <p className="mt-1 text-[10px] font-medium text-slate-400">
-                          {lockType === "level_up" ? "Unlock with a Level Up Code" : "Reserved for Pro and Plus"}
-                        </p>
+                      {isSelected && !isLocked && (
+                        <Check className="w-3 h-3 text-white" />
                       )}
-                    </button>
+                    </div>
+                  </button>
                 );
               })}
             </div>

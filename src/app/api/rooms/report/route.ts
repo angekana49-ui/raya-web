@@ -61,6 +61,20 @@ export async function POST(req: NextRequest) {
       return new Response(JSON.stringify({ error: 'Only the room host or active participants can generate the squad report' }), { status: 403 });
     }
 
+    const { data: existingReport, error: existingReportError } = await supabaseAdmin
+      .from('study_room_reports')
+      .select('*')
+      .eq('room_id', roomId)
+      .maybeSingle();
+
+    if (existingReportError) {
+      throw existingReportError;
+    }
+
+    if (existingReport) {
+      return new Response(JSON.stringify(existingReport), { status: 200 });
+    }
+
     // 2. Fetch conversation history
     if (!room.conversation_id) {
        return new Response(JSON.stringify({ error: 'No conversation linked to this room' }), { status: 400 });
@@ -163,17 +177,17 @@ Rules:
       }
     }
 
-    const { data: existingReport } = await supabaseAdmin
+    const { data: reportStub } = await supabaseAdmin
       .from('study_room_reports')
       .select('id')
       .eq('room_id', roomId)
       .maybeSingle();
 
-    const reportQuery = existingReport
+    const reportQuery = reportStub
       ? supabaseAdmin
           .from('study_room_reports')
           .update(reportPayload)
-          .eq('id', existingReport.id)
+          .eq('id', reportStub.id)
       : supabaseAdmin
           .from('study_room_reports')
           .insert(reportPayload);

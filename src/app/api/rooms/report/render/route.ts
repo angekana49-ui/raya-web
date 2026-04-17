@@ -3,17 +3,16 @@ import { supabaseAdmin } from "@/lib/supabase/server";
 import { resolveUserId } from "@/lib/auth";
 import { buildRoomReportHtml, type StudyRoomReport } from "@/lib/room-report";
 
-type Params = {
-  params: Promise<{ roomId: string }>;
-};
-
-export async function GET(req: NextRequest, { params }: Params) {
+export async function POST(req: NextRequest) {
   const userId = await resolveUserId(req);
   if (!userId) {
     return new Response("Unauthorized", { status: 401 });
   }
 
-  const { roomId } = await params;
+  const { roomId, print } = await req.json();
+  if (!roomId) {
+    return new Response("Room ID is required", { status: 400 });
+  }
 
   const [roomRes, participantRes, reportRes] = await Promise.all([
     supabaseAdmin
@@ -50,14 +49,13 @@ export async function GET(req: NextRequest, { params }: Params) {
     roomName: roomRes.data.title,
     mission: roomRes.data.mission,
     report: reportRes.data as StudyRoomReport,
-    autoPrint: req.nextUrl.searchParams.get("print") === "1",
+    autoPrint: Boolean(print),
   });
 
   return new Response(html, {
     status: 200,
     headers: {
       "Content-Type": "text/html; charset=utf-8",
-      "Content-Disposition": `inline; filename=\"room-report-${roomId}.html\"`,
       "Cache-Control": "no-store",
     },
   });

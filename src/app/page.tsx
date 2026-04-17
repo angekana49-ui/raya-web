@@ -1353,7 +1353,15 @@ export default function Home() {
             <header className="glass-panel border-t-0 border-x-0 rounded-b-[2rem] mx-2 mt-2 sticky top-2 z-50">
               <div className="flex items-center justify-between px-4 py-3 min-h-[60px]">
                 <button
-                  onClick={() => setSidebarVisible((prev) => !prev)}
+                  onClick={() => {
+                    const isMobile = window.innerWidth < 768;
+                    if (isMobile && !sidebarVisible) {
+                      setLearningHudVisible(false);
+                      setSidebarVisible(true);
+                    } else {
+                      setSidebarVisible(prev => !prev);
+                    }
+                  }}
                   aria-label={sidebarVisible ? "Close sidebar" : "Open sidebar"}
                   className="w-9 h-9 rounded-full bg-slate-100 flex items-center justify-center hover:bg-slate-200 transition-colors"
                 >
@@ -1369,7 +1377,15 @@ export default function Home() {
                 </div>
 
                 <button
-                  onClick={() => setLearningHudVisible((prev) => !prev)}
+                  onClick={() => {
+                    const isMobile = window.innerWidth < 768;
+                    if (isMobile && !learningHudVisible) {
+                      setSidebarVisible(false);
+                      setLearningHudVisible(true);
+                    } else {
+                      setLearningHudVisible(prev => !prev);
+                    }
+                  }}
                   aria-label={learningHudVisible ? "Hide progress panel" : "Show progress panel"}
                   className="w-9 h-9 rounded-full bg-slate-100 flex items-center justify-center hover:bg-slate-200 transition-colors"
                 >
@@ -1814,6 +1830,22 @@ export default function Home() {
         secondaryAction={activePopup?.secondaryAction}
         onClose={closeActivePopup}
       />
+
+      {/* Mobile Sidebar Overlay */}
+      <AnimatePresence>
+        {(sidebarVisible || learningHudVisible) && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            onClick={() => {
+              setSidebarVisible(false);
+              setLearningHudVisible(false);
+            }}
+            className="fixed inset-0 z-40 bg-slate-900/40 backdrop-blur-sm md:hidden"
+          />
+        )}
+      </AnimatePresence>
     </>
   );
 }

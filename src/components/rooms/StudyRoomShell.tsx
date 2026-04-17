@@ -12,7 +12,7 @@ import RoomAIOptionsMenu from "@/components/menus/RoomAIOptionsMenu";
 import ModelPickerMenu from "@/components/menus/ModelPickerMenu";
 import { Loader2 } from "lucide-react";
 import { supabase } from "@/lib/supabase/client";
-import { advanceStudyRoomTimer } from "@/services/study-rooms.service";
+import { advanceStudyRoomTimer, syncRoomOnlineCount } from "@/services/study-rooms.service";
 import { DEFAULT_USER_ENTITLEMENTS } from "@/lib/user-entitlements";
 
 type RoomMember = {
@@ -60,6 +60,7 @@ interface StudyRoomShellProps {
   currentUserId?: string;
   onReturnToLobby?: () => void;
   entitlements?: UserEntitlements;
+  hasReport?: boolean;
 }
 
 const statusLabel: Record<RoomMember["status"], string> = {
@@ -69,10 +70,10 @@ const statusLabel: Record<RoomMember["status"], string> = {
 };
 
 const quickActions = [
-  { label: "Explain", text: "I think the cleanest explanation is:" },
-  { label: "Vote", text: "My vote goes to option" },
-  { label: "Hint", text: "Small hint for the squad:" },
-  { label: "Summarize", text: "Quick summary so far:" },
+  { label: "Explain", text: "I think the cleanest explanation is:", actionType: "explain" },
+  { label: "Vote", text: "My vote goes to option", actionType: "vote" },
+  { label: "Hint", text: "Small hint for the squad:", actionType: "hint" },
+  { label: "Summarize", text: "Quick summary so far:", actionType: "summarize" },
 ];
 
 export default function StudyRoomShell({
@@ -102,6 +103,7 @@ export default function StudyRoomShell({
   currentUserId,
   onReturnToLobby,
   entitlements,
+  hasReport = false,
 }: StudyRoomShellProps) {
   const [roomMessages, setRoomMessages] = useState<RoomEvent[]>(events);
   const [draft, setDraft] = useState("");
@@ -114,13 +116,28 @@ export default function StudyRoomShell({
   const feedRef = useRef<HTMLDivElement | null>(null);
   const [roomFiles, setRoomFiles] = useState<AttachedFile[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const presenceKeyRef = useRef(
+    currentUserId || `guest-${Math.random().toString(36).slice(2, 10)}`,
+  );
+  const pendingActionTypeRef = useRef<string | undefined>(undefined);
+  const pendingTurnRef = useRef<{
+    clientMessageId: string;
+    userTempId: string;
+    userText: string;
+    assistantTempId?: string;
+  } | null>(null);
   const [aiModeInternal, setAiModeInternal] = useState<"passive" | "active">(roomAiMode || "active");
   const [aiModelInternal, setAiModelInternal] = useState("gemini-3.1-flash-lite-preview");
   const [changesRemaining, setChangesRemaining] = useState(isCreator ? 5 : 1);
+  const [liveOnlineCount, setLiveOnlineCount] = useState(onlineCount);
 
   useEffect(() => {
     setAiModeInternal(roomAiMode || "active");
   }, [roomAiMode]);
+
+  useEffect(() => {
+    setLiveOnlineCount(onlineCount);
+  }, [onlineCount]);
 
   const [aiMenuVisible, setAiMenuVisible] = useState(false);
   const [modelMenuVisible, setModelMenuVisible] = useState(false);
@@ -187,7 +204,7 @@ export default function StudyRoomShell({
       .channel(`room:${conversationId}`, {
         config: {
           presence: {
-            key: currentUserId || 'guest',
+            key: presenceKeyRef.current,
           },
         },
       })
@@ -204,6 +221,37 @@ export default function StudyRoomShell({
           setRoomMessages((prev) => {
             if (prev.some(m => m.id === newMessage.id)) return prev;
 
+            const pendingTurn = pendingTurnRef.current;
+            if (newMessage.sender === "user" && pendingTurn && pendingTurn.userText === newMessage.text) {
+              pendingTurnRef.current = {
+                ...pendingTurn,
+                userTempId: newMessage.id,
+              };
+              return prev.map((message) =>
+                message.id === pendingTurn.userTempId
+                  ? {
+                      ...message,
+                      id: newMessage.id,
+                      title: "You",
+                      meta: "Just now",
+                    }
+                  : message,
+              );
+            }
+
+            if (newMessage.sender === "assistant" && pendingTurn?.assistantTempId) {
+              return prev.map((message) =>
+                message.id === pendingTurn.assistantTempId
+                  ? {
+                      ...message,
+                      id: newMessage.id,
+                      body: newMessage.text,
+                      meta: "Moderator",
+                    }
+                  : message,
+              );
+            }
+
             const mapped: RoomEvent = {
               id: newMessage.id,
               type: newMessage.sender === 'assistant' ? 'ai' : 'user',
@@ -218,11 +266,15 @@ export default function StudyRoomShell({
       .on('presence', { event: 'sync' }, () => {
         const newState = channel.presenceState();
         const count = Object.keys(newState).length;
-        console.log('Online members:', count);
+        setLiveOnlineCount(count);
+        if (roomId) {
+          void syncRoomOnlineCount(roomId, count);
+        }
       })
       .subscribe(async (status) => {
         if (status === 'SUBSCRIBED' && roomId) {
           await channel.track({
+            user_id: currentUserId || null,
             online_at: new Date().toISOString(),
           });
           // Increment in DB
@@ -358,6 +410,14 @@ export default function StudyRoomShell({
     setTimeout(() => setHeaderPulse(false), 1000);
 
     const userMessageId = `user-${Date.now()}`;
+    const clientMessageId = `room-turn-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const actionType = pendingActionTypeRef.current;
+    pendingActionTypeRef.current = undefined;
+    pendingTurnRef.current = {
+      clientMessageId,
+      userTempId: userMessageId,
+      userText: trimmed || "Attached files",
+    };
     const userMessage: RoomEvent = {
       id: userMessageId,
       type: "user",
@@ -403,10 +463,12 @@ export default function StudyRoomShell({
         method: "POST",
         headers: { "Content-Type": "application/json", ...authHeaders },
         body: JSON.stringify({
+          clientMessageId,
           message: trimmed || "Attached files",
           aiMode: aiModeInternal,
           model: aiModelInternal,
           roomMission: mission,
+          actionType,
           conversationId, // Pass the conversation ID
           files: filePayloads,
         }),
@@ -434,8 +496,8 @@ export default function StudyRoomShell({
       const reader = res.body?.getReader();
       if (!reader) throw new Error("No reader");
 
-      const assistantId = `ai-${Date.now()}`;
-      let assistantIdAdded = false;
+        const assistantId = `ai-${Date.now()}`;
+        let assistantIdAdded = false;
 
       const decoder = new TextDecoder();
       let assistantText = "";
@@ -452,6 +514,12 @@ export default function StudyRoomShell({
             try {
               const data = JSON.parse(line.slice(6));
                 if (!assistantIdAdded && data.type !== 'complete') {
+                  if (pendingTurnRef.current?.clientMessageId === clientMessageId) {
+                    pendingTurnRef.current = {
+                      ...pendingTurnRef.current,
+                      assistantTempId: assistantId,
+                    };
+                  }
                   setRoomMessages((prev) => [
                     ...prev,
                     { id: assistantId, type: "ai", title: "RAYA Host", body: "", meta: "Moderator" }
@@ -488,6 +556,12 @@ export default function StudyRoomShell({
                   ]);
                 } else if (data.type === "complete" && data.content?.text) {
                   // Fallback for non-chunking completions
+                  if (pendingTurnRef.current?.clientMessageId === clientMessageId && !pendingTurnRef.current.assistantTempId) {
+                    pendingTurnRef.current = {
+                      ...pendingTurnRef.current,
+                      assistantTempId: assistantId,
+                    };
+                  }
                   if (!assistantIdAdded) {
                     setRoomMessages((prev) => [
                       ...prev,
@@ -505,6 +579,25 @@ export default function StudyRoomShell({
                       prev.map(m => m.id === assistantId ? { ...m, body: data.content.text } : m)
                     );
                   }
+                } else if (data.type === "ids_resolved" && data.content) {
+                  const resolvedUserId = data.content.userMessageId as string | undefined;
+                  const resolvedAssistantId = data.content.assistantMessageId as string | undefined;
+                  const pendingTurn = pendingTurnRef.current;
+
+                  if (pendingTurn?.clientMessageId === clientMessageId) {
+                    setRoomMessages((prev) =>
+                      prev.map((entry) => {
+                        if (resolvedUserId && entry.id === pendingTurn.userTempId) {
+                          return { ...entry, id: resolvedUserId };
+                        }
+                        if (resolvedAssistantId && pendingTurn.assistantTempId && entry.id === pendingTurn.assistantTempId) {
+                          return { ...entry, id: resolvedAssistantId };
+                        }
+                        return entry;
+                      }),
+                    );
+                    pendingTurnRef.current = null;
+                  }
                 } else if (data.type === "error") {
                   throw new Error(data.error || "Raya stream error");
                 }
@@ -517,6 +610,7 @@ export default function StudyRoomShell({
       }
     } catch (err) {
       console.error("Streaming error:", err);
+      pendingTurnRef.current = null;
       // Fallback to static message if stream fails (or show error)
       const errorMsg: RoomEvent = {
         id: `err-${Date.now()}`,
@@ -640,8 +734,9 @@ export default function StudyRoomShell({
     playUISound("pop");
   };
 
-  const handleQuickAction = (text: string) => {
+  const handleQuickAction = (text: string, actionType: string) => {
     onEngage?.();
+    pendingActionTypeRef.current = actionType;
     setDraft(text);
   };
 
@@ -673,9 +768,74 @@ export default function StudyRoomShell({
 
   // Report generation
   const [reportLoading, setReportLoading] = useState(false);
-  const [reportDone, setReportDone] = useState(false);
-  const handleGenerateReport = async () => {
-    if (!roomId) return;
+  const [reportDone, setReportDone] = useState(hasReport);
+  const autoReportStartedRef = useRef(false);
+  useEffect(() => {
+    setReportDone(hasReport);
+    if (hasReport) {
+      autoReportStartedRef.current = true;
+    }
+  }, [hasReport]);
+
+  const handleOpenReport = async (
+    mode: "view" | "pdf" = "pdf",
+    targetWindow?: Window | null,
+  ) => {
+    if (!roomId || typeof window === "undefined") return;
+
+    try {
+      const authHeaders = await getAuthHeaders();
+      const response = await fetch(`/api/rooms/report/render`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...authHeaders,
+        },
+        body: JSON.stringify({
+          roomId,
+          print: mode === "pdf",
+        }),
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text().catch(() => "");
+        throw new Error(errorText || `Failed to open report (${response.status})`);
+      }
+
+      const html = await response.text();
+      const blob = new Blob([html], { type: "text/html;charset=utf-8" });
+      const blobUrl = URL.createObjectURL(blob);
+      const openedWindow = targetWindow ?? window.open("", "_blank", "noopener,noreferrer");
+
+      if (!openedWindow) {
+        window.location.assign(blobUrl);
+        window.setTimeout(() => URL.revokeObjectURL(blobUrl), 60_000);
+        return;
+      }
+
+      openedWindow.location.href = blobUrl;
+      window.setTimeout(() => URL.revokeObjectURL(blobUrl), 60_000);
+    } catch (error) {
+      if (targetWindow && !targetWindow.closed) {
+        targetWindow.close();
+      }
+      console.error("[RAYA] Failed to open room report:", error);
+      alert("Could not open the room report right now.");
+    }
+  };
+
+  const handleGenerateReport = async (options?: { openAfter?: boolean }) => {
+    if (!roomId || reportLoading) return;
+    const reservedWindow =
+      options?.openAfter && typeof window !== "undefined"
+        ? window.open("", "_blank", "noopener,noreferrer")
+        : null;
+
+    if (reservedWindow) {
+      reservedWindow.document.write("<p style=\"font-family: Arial, sans-serif; padding: 24px;\">Preparing your room report...</p>");
+      reservedWindow.document.close();
+    }
+
     setReportLoading(true);
     try {
       const authHeaders = await getAuthHeaders();
@@ -686,17 +846,32 @@ export default function StudyRoomShell({
       });
       if (res.ok) {
         setReportDone(true);
+        if (options?.openAfter) {
+          void handleOpenReport("pdf", reservedWindow);
+        }
       } else {
         const err = await res.json().catch(() => ({}));
+        if (reservedWindow && !reservedWindow.closed) {
+          reservedWindow.close();
+        }
         console.error('[RAYA] Report generation failed:', err);
         alert(err.error || 'Failed to generate report');
       }
     } catch (e) {
+      if (reservedWindow && !reservedWindow.closed) {
+        reservedWindow.close();
+      }
       console.error('[RAYA] Report generation error:', e);
     } finally {
       setReportLoading(false);
     }
   };
+
+  useEffect(() => {
+    if (!isFinished || reportDone || autoReportStartedRef.current) return;
+    autoReportStartedRef.current = true;
+    void handleGenerateReport({ openAfter: false });
+  }, [isFinished, reportDone]);
 
   return (
     <div className="mx-auto flex h-full min-h-0 w-full max-w-[980px] flex-col px-3 pb-4 pt-3 sm:px-4">
@@ -797,7 +972,7 @@ export default function StudyRoomShell({
                 <div className="px-4 pb-4 pt-3 text-center">
                   <div className="flex flex-wrap items-center justify-center gap-1.5">
                     <span className="rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[10px] font-semibold text-slate-600">
-                      {Math.min(onlineCount, maxMembers)}/{maxMembers} online
+                      {Math.min(liveOnlineCount, maxMembers)}/{maxMembers} online
                     </span>
                     <motion.span
                       animate={headerPulse ? { scale: [1, 1.1, 1], backgroundColor: ["#f5f3ff", "#ddd6fe", "#f5f3ff"] } : {}}
@@ -865,7 +1040,7 @@ export default function StudyRoomShell({
                       Online
                     </div>
                     <p className="mt-1 text-sm font-black text-slate-900">
-                      {Math.min(onlineCount, maxMembers)}/{maxMembers}
+                      {Math.min(liveOnlineCount, maxMembers)}/{maxMembers}
                     </p>
                   </div>
 
@@ -989,7 +1164,7 @@ export default function StudyRoomShell({
             <div className="mt-5 flex flex-wrap items-center justify-center gap-3">
               {!reportDone ? (
                 <button
-                  onClick={handleGenerateReport}
+                  onClick={() => void handleGenerateReport({ openAfter: true })}
                   disabled={reportLoading}
                   className="inline-flex items-center gap-2 rounded-xl bg-indigo-600 px-5 py-2.5 text-sm font-bold text-white shadow-lg shadow-indigo-200 transition-all hover:bg-indigo-700 active:scale-95 disabled:opacity-50"
                 >
@@ -1000,9 +1175,18 @@ export default function StudyRoomShell({
                   )}
                 </button>
               ) : (
+                <>
                 <span className="inline-flex items-center gap-2 rounded-xl bg-emerald-100 px-5 py-2.5 text-sm font-bold text-emerald-700 border border-emerald-200">
                   ✅ Report saved
                 </span>
+                
+                <button
+                  onClick={() => void handleOpenReport("pdf")}
+                  className="inline-flex items-center gap-2 rounded-xl border border-emerald-200 bg-white px-5 py-2.5 text-sm font-bold text-emerald-700 transition-all hover:bg-emerald-50 active:scale-95"
+                >
+                  <Sparkles className="h-4 w-4" /> Open / Save PDF
+                </button>
+                </>
               )}
               {onReturnToLobby && (
                 <button
@@ -1023,7 +1207,7 @@ export default function StudyRoomShell({
             <button
               key={action.label}
               type="button"
-              onClick={() => handleQuickAction(action.text)}
+              onClick={() => handleQuickAction(action.text, action.actionType)}
               className="rounded-full border border-indigo-100 bg-indigo-50 px-3 py-1.5 text-xs font-bold text-indigo-700 transition-colors hover:bg-indigo-100"
             >
               {action.label}

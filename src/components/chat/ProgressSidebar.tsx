@@ -200,19 +200,54 @@ export default function ProgressSidebar({
           </div>
         </div>
 
-        {/* Simplified Gamification for MVP - Removed Quests and Trophy Cabinet */}
+        {/* 2. Daily Quests (New Section) */}
+        <div className="space-y-4 px-1">
+          <p className="text-[9px] font-black text-slate-400 uppercase tracking-[0.2em] leading-none">Daily Quests</p>
+          <div className="space-y-2.5">
+            {g.todaysMissions.slice(0, 4).map((mission) => {
+              const progress = Math.min(100, Math.round((mission.current / mission.target) * 100));
+              return (
+                <div key={mission.id} className="group cursor-default">
+                  <div className="flex items-center justify-between mb-1.5 px-0.5">
+                    <div className="flex items-center gap-2">
+                       {mission.completed ? <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500" /> : <Circle className="w-3.5 h-3.5 text-slate-300" />}
+                       <span className={cn("text-[11px] font-bold", mission.completed ? "text-slate-400 line-through" : "text-slate-700")}>
+                         <NoTranslate>{mission.title}</NoTranslate>
+                       </span>
+                    </div>
+                    <span className="text-[10px] font-black text-slate-400">{mission.current}/{mission.target}</span>
+                  </div>
+                  <div className="h-1.5 w-full bg-slate-100/80 rounded-full overflow-hidden border border-slate-200/50 relative">
+                    <motion.div 
+                      initial={{ width: 0 }}
+                      animate={{ width: `${progress}%` }}
+                      transition={{ duration: 1, ease: "easeOut" }}
+                      className={cn("h-full", mission.completed ? "bg-emerald-400" : "bg-indigo-400")}
+                    />
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
 
-        <div className="rounded-[24px] border border-slate-200/70 bg-white/90 shadow-sm p-4 space-y-3">
+        {/* 3. Account Section - Flush with sidebar */}
+        <div className="px-1 py-1 space-y-4">
           <div>
-            <p className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">Account</p>
-            <p className="mt-1 text-sm font-black text-slate-900">{identityReady ? accountLabel : "Student"}</p>
-            <p className="text-[11px] font-semibold text-slate-500">{identityReady ? accountHandle : "@student"}</p>
+            <p className="text-[9px] font-black text-slate-400 uppercase tracking-[0.2em] leading-none mb-2.5">Account</p>
+            <div className="flex items-center justify-between">
+               <div>
+                  <p className="text-sm font-black text-slate-900">{identityReady ? accountLabel : "Student"}</p>
+                  <p className="text-[11px] font-semibold text-slate-500">{identityReady ? accountHandle : "@student"}</p>
+               </div>
+               {userIsVerified ? <CheckCircle2 className="w-4 h-4 text-emerald-500" /> : <Circle className="w-4 h-4 text-amber-500 animate-pulse" />}
+            </div>
           </div>
           <div className={cn(
-            "rounded-2xl px-3 py-2.5 text-[11px] font-semibold leading-relaxed",
+            "rounded-2xl px-3 py-2.5 text-[11px] font-semibold leading-relaxed border",
             userIsVerified
-              ? "border border-emerald-100 bg-emerald-50 text-emerald-800"
-              : "border border-amber-200 bg-amber-50 text-amber-800"
+              ? "border-emerald-100 bg-emerald-50/50 text-emerald-800"
+              : "border-amber-100 bg-amber-50/50 text-amber-800"
           )}>
             {userIsVerified
               ? "Account secured. Your progress is tied to a verified profile."
@@ -222,10 +257,11 @@ export default function ProgressSidebar({
           </div>
         </div>
 
-        <div className="rounded-[24px] border border-slate-200/70 bg-white/90 shadow-sm p-4 space-y-3">
+        {/* 4. Study Access Section - Flush with sidebar */}
+        <div className="px-1 py-1 space-y-2">
           <div>
-            <p className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">Study Access</p>
-            <p className="mt-1 text-sm font-black text-slate-900">{usageSummary}</p>
+            <p className="text-[9px] font-black text-slate-400 uppercase tracking-[0.2em] leading-none mb-1.5">Study Access</p>
+            <p className="text-sm font-black text-slate-900">{usageSummary}</p>
           </div>
           <p className="text-[11px] font-semibold leading-relaxed text-slate-600">
             {usageDescription}

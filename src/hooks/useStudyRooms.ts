@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { StudyRoomPreview } from "@/types";
 import { supabase } from "@/lib/supabase/client";
 import {
@@ -10,7 +10,7 @@ import {
   getStudyRoomTheme,
   type StudyRoomTheme,
 } from "@/lib/study-room-data";
-import { createStudyRoom, getActiveRooms, mapStudyRoomRow, uploadRoomFiles } from "@/services/study-rooms.service";
+import { createStudyRoom, getActiveRooms, getRoomHistory, joinRoom, mapStudyRoomRow, RoomJoinError, uploadRoomFiles } from "@/services/study-rooms.service";
 
 type UseStudyRoomsOptions = {
   authLoading: boolean;
@@ -66,6 +66,7 @@ export function useStudyRooms({
   const [roomOnboardingNudgeVisible, setRoomOnboardingNudgeVisible] = useState(false);
   const [removedRoomIds, setRemovedRoomIds] = useState<string[]>([]);
   const [roomError, setRoomError] = useState<string | null>(null);
+  const joinedRoomRef = useRef<string | null>(null);
 
   useEffect(() => {
     const saved = localStorage.getItem("removed_study_rooms");
@@ -105,8 +106,24 @@ export function useStudyRooms({
   // Load rooms from Supabase
   useEffect(() => {
     async function loadRooms() {
-      const rooms = await getActiveRooms();
-      setStudyRooms(rooms);
+      const [activeRooms, historyRooms] = await Promise.all([
+        getActiveRooms(),
+        getRoomHistory(),
+      ]);
+
+      const merged = new Map<string, StudyRoomPreview>();
+      [...activeRooms, ...historyRooms].forEach((room) => {
+        const existing = merged.get(room.id);
+        merged.set(room.id, existing ? { ...existing, ...room } : room);
+      });
+
+      setStudyRooms(
+        [...merged.values()].sort((left, right) => {
+          const leftUpdated = new Date(left.updatedAt ?? left.createdAt ?? 0).getTime();
+          const rightUpdated = new Date(right.updatedAt ?? right.createdAt ?? 0).getTime();
+          return rightUpdated - leftUpdated;
+        }),
+      );
     }
     loadRooms();
   }, []);
@@ -135,7 +152,7 @@ export function useStudyRooms({
             if (index === -1) {
               // If it's inactive from the start, we might not want to add it to 'live' list 
               // unless it's the one we are currently looking at
-              if (row.is_active === false && mapped.id !== activeRoomIdState) {
+              if (row.is_active === false && mapped.timerStatus !== "finished" && mapped.id !== activeRoomIdState) {
                 return prev;
               }
               return [mapped, ...prev];
@@ -143,7 +160,7 @@ export function useStudyRooms({
             
             const next = [...prev];
             // If it becomes inactive and it's NOT the one we are looking at, remove it
-            if (row.is_active === false && mapped.id !== activeRoomIdState) {
+            if (row.is_active === false && mapped.timerStatus !== "finished" && mapped.id !== activeRoomIdState) {
               next.splice(index, 1);
             } else {
               next[index] = { ...next[index], ...mapped };
@@ -166,6 +183,45 @@ export function useStudyRooms({
   const setActiveRoomId = useCallback((roomId: string | null) => {
     setActiveRoomIdState(roomId);
   }, []);
+
+  useEffect(() => {
+    if (!activeRoomIdState) {
+      joinedRoomRef.current = null;
+      return;
+    }
+    if (!isSignedIn) return;
+    if (joinedRoomRef.current === activeRoomIdState) return;
+
+    const room = studyRooms.find((entry) => entry.id === activeRoomIdState);
+    if (!room || room.timerStatus === "finished") {
+      joinedRoomRef.current = activeRoomIdState;
+      return;
+    }
+
+    let cancelled = false;
+    joinedRoomRef.current = activeRoomIdState;
+
+    void joinRoom(activeRoomIdState).catch((error) => {
+      if (cancelled) return;
+      joinedRoomRef.current = null;
+
+      if (error instanceof RoomJoinError) {
+        setRoomError(error.message);
+        if (error.code === "ROOM_FULL" || error.code === "ROOM_CLOSED") {
+          setActiveRoomIdState(null);
+        }
+        return;
+      }
+
+      console.error("Failed to ensure room membership:", error);
+      setRoomError("Could not join this room right now.");
+      setActiveRoomIdState(null);
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [activeRoomIdState, isSignedIn, studyRooms]);
 
   useEffect(() => {
     if (typeof window === "undefined") return;

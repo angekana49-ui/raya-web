@@ -1,5 +1,7 @@
 type RoomMode = 'active' | 'passive';
 
+const ROOM_TRIGGER_ACTIONS = new Set(['explain', 'vote', 'hint', 'summarize']);
+
 const ROOM_INVOCATION_PATTERNS = [
   /@raya\b/i,
   /\braya ai\b/i,
@@ -14,6 +16,24 @@ function normalizeRoomMode(mode: string | undefined): RoomMode {
 
 export function isExplicitRoomInvocation(userMessage: string): boolean {
   return ROOM_INVOCATION_PATTERNS.some((pattern) => pattern.test(userMessage));
+}
+
+export function shouldRayaRespondInRoom(input: {
+  mode?: string;
+  userMessage: string;
+  actionType?: string;
+  healthIntervention?: boolean;
+}): boolean {
+  const mode = normalizeRoomMode(input.mode);
+  if (mode === 'active') return true;
+  if (input.healthIntervention) return true;
+  if (isExplicitRoomInvocation(input.userMessage)) return true;
+
+  const normalizedAction = typeof input.actionType === 'string'
+    ? input.actionType.trim().toLowerCase()
+    : 'normal';
+
+  return ROOM_TRIGGER_ACTIONS.has(normalizedAction);
 }
 
 export function buildRoomPrompt(input: {

@@ -17,7 +17,7 @@ import { supabaseAdmin } from '@/lib/supabase/server';
 import { resolveUserId } from '@/lib/auth';
 import { getModelById } from '@/lib/ai-models';
 import { getFirstUnlockedMode, getFirstUnlockedModel, isModeUnlocked, isModelUnlocked } from '@/lib/user-entitlements';
-import { buildRoomPrompt } from '@/lib/room-ai';
+import { buildRoomPrompt, shouldRayaRespondInRoom } from '@/lib/room-ai';
 import fs from 'fs';
 import path from 'path';
 
@@ -411,10 +411,12 @@ export async function POST(req: NextRequest) {
         shouldForceHealthIntervention = true;
       }
 
-      // Always call the model for open rooms: passive/active behaviour is carried in the
-      // room system prompt + buildRoomPrompt. A server-side "silent" gate caused users to
-      // see no replies (especially passive + no @raya) and looked broken.
-      shouldRespond = true;
+      shouldRespond = shouldRayaRespondInRoom({
+        mode: requestedRoomMode,
+        userMessage: message,
+        actionType,
+        healthIntervention: shouldForceHealthIntervention,
+      });
     }
 
     // 2. Select context and system prompt
@@ -487,7 +489,7 @@ export async function POST(req: NextRequest) {
       : Promise.resolve();
 
     const roomTurnLockPromise: Promise<RoomTurnAcquireResult> =
-      isRoomRequest && conversationId
+      isRoomRequest && conversationId && shouldRespond
         ? tryAcquireRoomAiTurn(conversationId)
         : Promise.resolve({ ok: true as const });
 

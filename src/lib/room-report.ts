@@ -110,6 +110,7 @@ export function buildRoomReportHtml(input: {
   roomName: string;
   mission: string;
   report: StudyRoomReport;
+  autoPrint?: boolean;
 }): string {
   const highlights = Array.isArray(input.report.highlights) ? input.report.highlights : [];
   const createdAt = input.report.created_at
@@ -206,6 +207,11 @@ export function buildRoomReportHtml(input: {
         section, .hero { break-inside: avoid; }
       }
     </style>
+    ${input.autoPrint ? `<script>
+      window.addEventListener('load', () => {
+        window.setTimeout(() => window.print(), 150);
+      });
+    </script>` : ""}
   </head>
   <body>
     <main class="page">
