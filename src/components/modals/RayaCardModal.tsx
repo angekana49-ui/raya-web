@@ -280,7 +280,7 @@ export function RayaCardModal({ isOpen, onClose, defaultTab = "backup" }: RayaCa
                                 <Loader2 className="w-6 h-6 text-white animate-spin" />
                                 <p className="text-indigo-200 text-xs font-medium">Preparing your key...</p>
                               </div>
-                            ) : !isRevealed && !isUpgrading && upgradeSuccess ? (
+                            ) : !isRevealed ? (
                               <button 
                                 onClick={() => {
                                   const views = parseInt(localStorage.getItem("raya_key_views") || "0", 10);
@@ -307,6 +307,12 @@ export function RayaCardModal({ isOpen, onClose, defaultTab = "backup" }: RayaCa
                                   <div className="flex items-center gap-1.5 text-indigo-200 text-[10px] font-bold uppercase tracking-wider">
                                     <Loader2 className="w-3 h-3 animate-spin" />
                                     Linking to account...
+                                  </div>
+                                )}
+                                {upgradeSuccess && !isUpgrading && (
+                                  <div className="flex items-center gap-1.5 text-emerald-300 text-[10px] font-bold uppercase tracking-wider">
+                                    <CheckCircle2 className="w-3 h-3" />
+                                    Account linked
                                   </div>
                                 )}
                               </div>
