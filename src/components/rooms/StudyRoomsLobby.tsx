@@ -190,7 +190,7 @@ export default function StudyRoomsLobby({
                       aria-label="Remove from room history"
                     >
                       <Archive className="h-3.5 w-3.5" />
-                      {confirmingRemoveId === room.id ? "Cacher?" : "Hide"}
+                      {confirmingRemoveId === room.id ? "Hide?" : "Hide"}
                     </button>
 
                     <div className="flex items-center justify-between mb-4">

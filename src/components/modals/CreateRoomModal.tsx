@@ -16,16 +16,16 @@ export default function CreateRoomModal({
   onClose,
   onCreate,
 }: CreateRoomModalProps) {
-  const [title, setTitle] = useState("Algebra Sprint");
-  const [mission, setMission] = useState("Solve together, explain clearly, and help the slowest teammate catch up before the timer ends.");
+  const [title, setTitle] = useState("");
+  const [mission, setMission] = useState("");
   const [duration, setDuration] = useState(30);
   const [aiMode, setAiMode] = useState<"passive" | "active">("active");
   const [files, setFiles] = useState<File[]>([]);
 
   useEffect(() => {
     if (!isOpen) return;
-    setTitle("Algebra Sprint");
-    setMission("Solve together, explain clearly, and help the slowest teammate catch up before the timer ends.");
+    setTitle("");
+    setMission("");
     setDuration(30);
     setAiMode("active");
     setFiles([]);
@@ -112,7 +112,7 @@ export default function CreateRoomModal({
                     value={title}
                     onChange={(e) => setTitle(e.target.value)}
                     className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3.5 text-sm font-bold text-slate-900 outline-none transition-all focus:border-indigo-400 focus:bg-white focus:ring-4 focus:ring-indigo-50"
-                    placeholder="Room Name (e.g. Physics Lab)"
+                    placeholder="e.g. Algebra Sprint"
                   />
                 </div>
 
@@ -125,7 +125,7 @@ export default function CreateRoomModal({
                     onChange={(e) => setMission(e.target.value)}
                     rows={3}
                     className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3.5 text-sm font-medium leading-relaxed text-slate-900 outline-none transition-all focus:border-indigo-400 focus:bg-white focus:ring-4 focus:ring-indigo-50"
-                    placeholder="What should the squad achieve together?"
+                    placeholder="e.g. Solve together, explain clearly, and help the slowest teammate catch up before the timer ends."
                   />
                 </div>
 

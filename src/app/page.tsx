@@ -347,7 +347,7 @@ export default function Home() {
   }, [user]);
 
   useEffect(() => {
-    if (authLoading || authModalVisible) return;
+    if (authLoading || authModalVisible || rayaCardModalOpen) return;
     if (invitedGuestFlow && !roomOnboardingNudgeVisible) {
       setOnboardingVisible(false);
       return;
@@ -358,7 +358,7 @@ export default function Home() {
     }
     setOnboardingVisible(false);
     setOnboardingError(null);
-  }, [authLoading, authModalVisible, invitedGuestFlow, isProfileComplete, roomOnboardingNudgeVisible, user]);
+  }, [authLoading, authModalVisible, rayaCardModalOpen, invitedGuestFlow, isProfileComplete, roomOnboardingNudgeVisible, user]);
 
   useEffect(() => {
     const settings = readAppSettings();
@@ -969,16 +969,17 @@ export default function Home() {
   };
 
   const handleDeleteConversation = async (id: string) => {
+    setConversations((prev) => prev.filter((c) => c.id !== id));
+    if (activeConversationId === id) {
+      resetSessionAggregator();
+      setActiveConversationId(null);
+      setAllMessages([]);
+      setActiveLeafId(null);
+    }
+    
     try {
       const headers = await getAuthHeaders();
       await fetch(`/api/conversations/${id}`, { method: "DELETE", headers });
-      setConversations((prev) => prev.filter((c) => c.id !== id));
-      if (activeConversationId === id) {
-        resetSessionAggregator();
-        setActiveConversationId(null);
-        setAllMessages([]);
-        setActiveLeafId(null);
-      }
     } catch (err) {
       console.error("Failed to delete conversation:", err);
     }
@@ -1842,7 +1843,7 @@ export default function Home() {
               setSidebarVisible(false);
               setLearningHudVisible(false);
             }}
-            className="fixed inset-0 z-40 bg-slate-900/40 backdrop-blur-sm md:hidden"
+            className="fixed inset-0 z-[60] bg-slate-900/40 backdrop-blur-sm md:hidden"
           />
         )}
       </AnimatePresence>

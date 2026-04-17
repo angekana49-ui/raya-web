@@ -69,7 +69,9 @@ export async function GET(req: NextRequest) {
   const createdRoomsRes = await supabaseAdmin
     .from("study_rooms")
     .select(`
-      *,
+      id, title, mission, online_count, max_members, duration, ai_mode, files,
+      conversation_id, timer_started_at, timer_ends_at, timer_status,
+      alert_5m_sent, alert_2m_sent, alert_end_sent, created_at, updated_at,
       study_room_reports (
         created_at
       )
@@ -85,7 +87,9 @@ export async function GET(req: NextRequest) {
     ? await supabaseAdmin
         .from("study_rooms")
         .select(`
-          *,
+          id, title, mission, online_count, max_members, duration, ai_mode, files,
+          conversation_id, timer_started_at, timer_ends_at, timer_status,
+          alert_5m_sent, alert_2m_sent, alert_end_sent, created_at, updated_at,
           study_room_reports (
             created_at
           )

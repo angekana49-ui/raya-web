@@ -485,10 +485,10 @@ export default function StudyRoomShell({
         }
         if (res.status === 401) {
           errMsg =
-            "Connecte-toi pour que Raya puisse répondre dans cette room (la conversation est liée à ton compte).";
+            "Please log in so Raya can reply in this room (the conversation is linked to your account).";
         }
         if (res.status === 409 && errMsg.toLowerCase().includes("closed")) {
-          errMsg = "Cette session de room est terminée (lecture seule).";
+          errMsg = "This room session has ended (read-only).";
         }
         throw new Error(errMsg);
       }
@@ -808,12 +808,17 @@ export default function StudyRoomShell({
       const openedWindow = targetWindow ?? window.open("", "_blank", "noopener,noreferrer");
 
       if (!openedWindow) {
-        window.location.assign(blobUrl);
+        const a = document.createElement("a");
+        a.href = blobUrl;
+        a.download = "Room_Report.html";
+        a.click();
         window.setTimeout(() => URL.revokeObjectURL(blobUrl), 60_000);
         return;
       }
 
-      openedWindow.location.href = blobUrl;
+      openedWindow.document.open();
+      openedWindow.document.write(html);
+      openedWindow.document.close();
       window.setTimeout(() => URL.revokeObjectURL(blobUrl), 60_000);
     } catch (error) {
       if (targetWindow && !targetWindow.closed) {
@@ -1181,7 +1186,7 @@ export default function StudyRoomShell({
                 </span>
                 
                 <button
-                  onClick={() => void handleOpenReport("pdf")}
+                  onClick={() => void handleOpenReport("pdf", window.open("", "_blank", "noopener,noreferrer"))}
                   className="inline-flex items-center gap-2 rounded-xl border border-emerald-200 bg-white px-5 py-2.5 text-sm font-bold text-emerald-700 transition-all hover:bg-emerald-50 active:scale-95"
                 >
                   <Sparkles className="h-4 w-4" /> Open / Save PDF

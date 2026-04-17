@@ -213,7 +213,7 @@ export default function Sidebar({
     <>
       <aside
       className={cn(
-        "fixed inset-y-2 left-2 z-50 md:relative md:inset-0 h-[calc(100vh-1rem)] shrink-0 glass-panel rounded-3xl flex flex-col overflow-hidden transition-all duration-300",
+        "fixed inset-y-2 left-2 z-[70] md:relative md:inset-0 h-[calc(100vh-1rem)] shrink-0 glass-panel rounded-3xl flex flex-col overflow-hidden transition-all duration-300",
         visible
           ? "w-[280px] sm:w-[300px] opacity-100 translate-x-0"
           : "w-0 opacity-0 pointer-events-none -translate-x-full md:translate-x-0"
@@ -408,7 +408,7 @@ export default function Sidebar({
                            title="Hide from room history"
                         >
                           <Archive className="w-3 h-3" />
-                          {confirmingRoomId === room.id ? "Cacher?" : "Hide"}
+                          {confirmingRoomId === room.id ? "Hide?" : "Hide"}
                         </button>
                       </div>
                     </div>
@@ -475,7 +475,7 @@ export default function Sidebar({
                             {confirmingDeleteId === conversation.id ? (
                               <>
                                 <Trash2 className="w-3.5 h-3.5" />
-                                <span className="text-[10px] font-black uppercase">Supprimer?</span>
+                                <span className="text-[10px] font-black uppercase">Delete?</span>
                               </>
                             ) : (
                               <Trash2 className="w-3.5 h-3.5" />

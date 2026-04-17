@@ -110,7 +110,8 @@ export default function OnboardingModal({
     selectedLevel !== "" &&
     (!captchaRequired || Boolean(captchaToken));
 
-  const handleSubmit = () => {
+  const handleSubmit = (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
     if (!canSubmit || loading) return;
     if (captchaRequired && !captchaToken) {
       setCaptchaError("Please complete the verification first.");
@@ -206,7 +207,7 @@ export default function OnboardingModal({
                 Pick a unique pseudo and your school level.
               </p>
             </div>
-            <div className="flex-1 overflow-y-auto min-h-0 bg-white">
+            <form onSubmit={handleSubmit} className="flex-1 overflow-y-auto min-h-0 bg-white">
               <div className="px-5 py-4 space-y-5">
               <div>
                 <label className="block text-xs font-semibold text-gray-500 mb-1.5 uppercase tracking-wide">
@@ -306,10 +307,11 @@ export default function OnboardingModal({
                 </p>
               )}
               </div>
-            </div>
+            </form>
 
             <div className="p-5 border-t border-slate-100 bg-slate-50/50 shrink-0 flex flex-col items-center gap-3">
               <button
+                type="button"
                 onClick={handleSubmit}
                 disabled={!canSubmit || loading}
                 className={cn(

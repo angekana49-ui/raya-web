@@ -124,7 +124,7 @@ export default function RootLayout({
           dangerouslySetInnerHTML={{ __html: JSON.stringify(organizationSchema) }}
         />
       </head>
-      <body className="antialiased font-sans">
+      <body className="antialiased font-sans" suppressHydrationWarning>
         {children}
         <GoogleTranslateScript />
         <SocialNotificationCenter />
