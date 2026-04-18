@@ -1,22 +1,19 @@
 -- ============================================================
 -- RAYA - Migration 035: Anti-Farm & Promo Code Security
 -- ============================================================
--- 1. Anyone can redeem a Level Up code (it gets recorded),
---    but benefits only activate for verified email accounts.
--- 2. Per-identity limit: one real email can only redeem ONE code
---    across ALL promo codes, preventing a single person from
---    burning all slots in a class.
+-- 1. Anyone (anon, ZKAR, verified) can redeem a Level Up code
+--    and immediately gets the benefits.
+-- 2. One account = ONE code max (across all level_up codes).
+--    This prevents a single person from burning all class slots.
 -- 3. Auto-cleanup of anonymous accounts inactive for 60+ days.
 -- ============================================================
 
 
 -- ──────────────────────────────────────────────────────────────
--- 1. REWRITE redeem_level_up_code
---    • Everyone can call it (anonymous, ZKAR, verified)
---    • The redemption is RECORDED for everyone
---    • But get_user_entitlements only ACTIVATES benefits
---      when account_state = 'active_verified'
---    • Anti-farm: one verified email = max 1 code redemption
+-- 1. redeem_level_up_code
+--    • Open to ALL account types
+--    • Benefits activate immediately
+--    • Hard rule: 1 account = 1 level_up code ever
 -- ──────────────────────────────────────────────────────────────
 
 CREATE OR REPLACE FUNCTION public.redeem_level_up_code(p_code TEXT)
@@ -30,8 +27,6 @@ DECLARE
   v_user public.users%ROWTYPE;
   v_promo public.promo_codes%ROWTYPE;
   v_normalized_code TEXT := UPPER(TRIM(COALESCE(p_code, '')));
-  v_is_verified BOOLEAN;
-  v_existing_any_redemption BOOLEAN;
 BEGIN
   IF v_auth_user_id IS NULL THEN
     RAISE EXCEPTION 'Unauthorized';
@@ -51,31 +46,23 @@ BEGIN
     RAISE EXCEPTION 'User profile not found';
   END IF;
 
-  v_is_verified := COALESCE(v_user.account_state, 'onboarding_pending') = 'active_verified';
-
   -- ================================================================
-  -- ANTI-FARM: If user IS verified, check they haven't already
-  -- redeemed ANY level_up code (not just this one).
-  -- This prevents one person using multiple codes to eat all class
-  -- slots. One real verified email = one code, period.
+  -- ANTI-FARM: Has this account ALREADY redeemed ANY level_up code?
+  -- One account = one code, period. Doesn't matter if anon or verified.
   -- ================================================================
-  IF v_is_verified THEN
-    SELECT EXISTS (
-      SELECT 1
-      FROM public.user_promo_code_redemptions upr
-      JOIN public.promo_codes pc ON pc.id = upr.promo_code_id
-      WHERE upr.user_id = v_user.id
-        AND COALESCE(pc.bonus_features, '[]'::jsonb) ? 'level_up'
-    ) INTO v_existing_any_redemption;
-
-    IF v_existing_any_redemption THEN
-      RETURN jsonb_build_object(
-        'redeemed', FALSE,
-        'alreadyRedeemed', TRUE,
-        'message', 'You have already redeemed a Level Up Code. Each verified account can only use one.',
-        'entitlements', public.get_user_entitlements()
-      );
-    END IF;
+  IF EXISTS (
+    SELECT 1
+    FROM public.user_promo_code_redemptions upr
+    JOIN public.promo_codes pc ON pc.id = upr.promo_code_id
+    WHERE upr.user_id = v_user.id
+      AND COALESCE(pc.bonus_features, '[]'::jsonb) ? 'level_up'
+  ) THEN
+    RETURN jsonb_build_object(
+      'redeemed', FALSE,
+      'alreadyRedeemed', TRUE,
+      'message', 'You have already used a Level Up Code. One code per account.',
+      'entitlements', public.get_user_entitlements()
+    );
   END IF;
 
   -- Lock for concurrency prevention (double-spend)
@@ -95,57 +82,29 @@ BEGIN
     RAISE EXCEPTION 'Invalid or expired Level Up Code';
   END IF;
 
-  -- Check if THIS user already redeemed THIS specific code
-  IF EXISTS (
-    SELECT 1
-    FROM public.user_promo_code_redemptions upr
-    WHERE upr.user_id = v_user.id
-      AND upr.promo_code_id = v_promo.id
-  ) THEN
-    RETURN jsonb_build_object(
-      'redeemed', FALSE,
-      'alreadyRedeemed', TRUE,
-      'message', 'Level Up Code already redeemed',
-      'entitlements', public.get_user_entitlements()
-    );
-  END IF;
-
   IF v_promo.max_uses IS NOT NULL AND COALESCE(v_promo.current_uses, 0) >= v_promo.max_uses THEN
     RAISE EXCEPTION 'This Level Up Code has reached its usage limit';
   END IF;
 
-  -- Record the redemption for everyone (verified or not)
+  -- Record redemption + bump usage counter
   INSERT INTO public.user_promo_code_redemptions (
-    user_id,
-    promo_code_id,
-    code,
-    metadata
+    user_id, promo_code_id, code, metadata
   )
   VALUES (
     v_user.id,
     v_promo.id,
     v_normalized_code,
-    jsonb_build_object(
-      'bonus_features', COALESCE(v_promo.bonus_features, '[]'::jsonb),
-      'activated', v_is_verified
-    )
+    jsonb_build_object('bonus_features', COALESCE(v_promo.bonus_features, '[]'::jsonb))
   );
 
-  -- Only count toward max_uses if the user is verified (real seat taken)
-  IF v_is_verified THEN
-    UPDATE public.promo_codes
-    SET current_uses = COALESCE(current_uses, 0) + 1
-    WHERE id = v_promo.id;
-  END IF;
+  UPDATE public.promo_codes
+  SET current_uses = COALESCE(current_uses, 0) + 1
+  WHERE id = v_promo.id;
 
   RETURN jsonb_build_object(
     'redeemed', TRUE,
     'alreadyRedeemed', FALSE,
-    'activated', v_is_verified,
-    'message', CASE
-      WHEN v_is_verified THEN 'Level Up Code applied successfully!'
-      ELSE 'Code recorded! Verify your email to activate the benefits.'
-    END,
+    'message', 'Level Up Code applied successfully!',
     'bonusFeatures', COALESCE(v_promo.bonus_features, '[]'::jsonb),
     'entitlements', public.get_user_entitlements()
   );
@@ -154,8 +113,8 @@ $$;
 
 
 -- ──────────────────────────────────────────────────────────────
--- 2. UPDATE get_user_entitlements to gate level_up benefits
---    behind account_state = 'active_verified'
+-- 2. get_user_entitlements — level_up active for ALL account
+--    types as long as they have a valid redemption
 -- ──────────────────────────────────────────────────────────────
 
 CREATE OR REPLACE FUNCTION public.get_user_entitlements()
@@ -230,24 +189,18 @@ BEGIN
   v_has_premium_access := v_is_pro OR v_is_plus;
   v_is_verified := COALESCE(v_user.account_state, 'onboarding_pending') = 'active_verified' OR v_has_premium_access;
 
-  -- ════════════════════════════════════════════════════════════
-  -- Level Up is ONLY active if the user is verified AND has
-  -- a valid redemption. Unverified users see "code recorded"
-  -- but get zero benefits until they verify their email.
-  -- ════════════════════════════════════════════════════════════
-  IF v_is_verified THEN
-    SELECT EXISTS (
-      SELECT 1
-      FROM public.user_promo_code_redemptions upr
-      JOIN public.promo_codes pc ON pc.id = upr.promo_code_id
-      WHERE upr.user_id = v_user.id
-        AND pc.is_active = TRUE
-        AND pc.valid_from <= NOW()
-        AND (pc.valid_until IS NULL OR pc.valid_until >= NOW())
-        AND COALESCE(pc.bonus_features, '[]'::jsonb) ? 'level_up'
-    )
-    INTO v_level_up_active;
-  END IF;
+  -- Level Up: active for ANY account type with a valid redemption
+  SELECT EXISTS (
+    SELECT 1
+    FROM public.user_promo_code_redemptions upr
+    JOIN public.promo_codes pc ON pc.id = upr.promo_code_id
+    WHERE upr.user_id = v_user.id
+      AND pc.is_active = TRUE
+      AND pc.valid_from <= NOW()
+      AND (pc.valid_until IS NULL OR pc.valid_until >= NOW())
+      AND COALESCE(pc.bonus_features, '[]'::jsonb) ? 'level_up'
+  )
+  INTO v_level_up_active;
 
   IF v_is_verified THEN
     v_token_limit := 60000;
@@ -315,7 +268,6 @@ $$;
 
 -- ──────────────────────────────────────────────────────────────
 -- 3. AUTO-CLEANUP: Purge anonymous accounts inactive 60+ days
---    Call via pg_cron or Supabase scheduled function.
 -- ──────────────────────────────────────────────────────────────
 
 CREATE OR REPLACE FUNCTION public.cleanup_stale_anonymous_accounts()
@@ -329,8 +281,6 @@ DECLARE
   v_deleted_count INTEGER := 0;
   v_auth_id UUID;
 BEGIN
-  -- Find anonymous users whose public profile hasn't been
-  -- touched in 60 days and who never verified an email.
   FOR v_auth_id IN
     SELECT u.auth_user_id
     FROM public.users u
@@ -339,10 +289,6 @@ BEGIN
       AND COALESCE(u.auth_method, 'anonymous') IN ('anonymous', 'guest')
       AND COALESCE(u.updated_at, u.created_at, NOW()) < v_cutoff
   LOOP
-    -- Delete from Supabase Auth (cascades to public.users via trigger/FK)
-    -- NOTE: This requires the service role. When called via pg_cron inside
-    -- Supabase, the function runs as the owner (superuser), so this works.
-    -- From an external cron, call via the management API instead.
     DELETE FROM public.users WHERE auth_user_id = v_auth_id;
     v_deleted_count := v_deleted_count + 1;
   END LOOP;
