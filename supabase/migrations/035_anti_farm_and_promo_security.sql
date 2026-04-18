@@ -1,19 +1,22 @@
 -- ============================================================
 -- RAYA - Migration 035: Anti-Farm & Promo Code Security
 -- ============================================================
--- 1. Anyone (anon, ZKAR, verified) can redeem a Level Up code
---    and immediately gets the benefits.
--- 2. One account = ONE code max (across all level_up codes).
---    This prevents a single person from burning all class slots.
+-- Pipeline: school → class → class_enrollment → promo_code
+-- Each class_enrollment has a unique promo_code linked via FK.
+-- max_uses is set to expected_size + max_overflow (typically +5).
+-- 
+-- Rules:
+-- 1. Anyone can redeem a code and get benefits immediately.
+-- 2. One account can only redeem ONE level_up code per 9 months.
 -- 3. Auto-cleanup of anonymous accounts inactive for 60+ days.
 -- ============================================================
 
 
 -- ──────────────────────────────────────────────────────────────
 -- 1. redeem_level_up_code
---    • Open to ALL account types
---    • Benefits activate immediately
---    • Hard rule: 1 account = 1 level_up code ever
+--    • Open to ALL account types (anon, ZKAR, verified)
+--    • Benefits activate immediately for everyone
+--    • Cooldown: 1 code per account per 9 months
 -- ──────────────────────────────────────────────────────────────
 
 CREATE OR REPLACE FUNCTION public.redeem_level_up_code(p_code TEXT)
@@ -27,6 +30,7 @@ DECLARE
   v_user public.users%ROWTYPE;
   v_promo public.promo_codes%ROWTYPE;
   v_normalized_code TEXT := UPPER(TRIM(COALESCE(p_code, '')));
+  v_last_redemption TIMESTAMPTZ;
 BEGIN
   IF v_auth_user_id IS NULL THEN
     RAISE EXCEPTION 'Unauthorized';
@@ -47,20 +51,21 @@ BEGIN
   END IF;
 
   -- ================================================================
-  -- ANTI-FARM: Has this account ALREADY redeemed ANY level_up code?
-  -- One account = one code, period. Doesn't matter if anon or verified.
+  -- ANTI-FARM: 9-month cooldown per account.
+  -- One person cannot burn multiple class slots within 9 months.
   -- ================================================================
-  IF EXISTS (
-    SELECT 1
-    FROM public.user_promo_code_redemptions upr
-    JOIN public.promo_codes pc ON pc.id = upr.promo_code_id
-    WHERE upr.user_id = v_user.id
-      AND COALESCE(pc.bonus_features, '[]'::jsonb) ? 'level_up'
-  ) THEN
+  SELECT MAX(upr.redeemed_at)
+  INTO v_last_redemption
+  FROM public.user_promo_code_redemptions upr
+  JOIN public.promo_codes pc ON pc.id = upr.promo_code_id
+  WHERE upr.user_id = v_user.id
+    AND COALESCE(pc.bonus_features, '[]'::jsonb) ? 'level_up';
+
+  IF v_last_redemption IS NOT NULL AND v_last_redemption > NOW() - INTERVAL '9 months' THEN
     RETURN jsonb_build_object(
       'redeemed', FALSE,
       'alreadyRedeemed', TRUE,
-      'message', 'You have already used a Level Up Code. One code per account.',
+      'message', 'You can only use one Level Up Code every 9 months. Try again later.',
       'entitlements', public.get_user_entitlements()
     );
   END IF;
@@ -82,6 +87,22 @@ BEGIN
     RAISE EXCEPTION 'Invalid or expired Level Up Code';
   END IF;
 
+  -- Check if THIS user already redeemed THIS specific code
+  IF EXISTS (
+    SELECT 1
+    FROM public.user_promo_code_redemptions upr
+    WHERE upr.user_id = v_user.id
+      AND upr.promo_code_id = v_promo.id
+  ) THEN
+    RETURN jsonb_build_object(
+      'redeemed', FALSE,
+      'alreadyRedeemed', TRUE,
+      'message', 'Level Up Code already redeemed',
+      'entitlements', public.get_user_entitlements()
+    );
+  END IF;
+
+  -- Check class capacity (max_uses = expected_size + max_overflow)
   IF v_promo.max_uses IS NOT NULL AND COALESCE(v_promo.current_uses, 0) >= v_promo.max_uses THEN
     RAISE EXCEPTION 'This Level Up Code has reached its usage limit';
   END IF;
@@ -114,7 +135,7 @@ $$;
 
 -- ──────────────────────────────────────────────────────────────
 -- 2. get_user_entitlements — level_up active for ALL account
---    types as long as they have a valid redemption
+--    types, no verification gate
 -- ──────────────────────────────────────────────────────────────
 
 CREATE OR REPLACE FUNCTION public.get_user_entitlements()
@@ -189,7 +210,7 @@ BEGIN
   v_has_premium_access := v_is_pro OR v_is_plus;
   v_is_verified := COALESCE(v_user.account_state, 'onboarding_pending') = 'active_verified' OR v_has_premium_access;
 
-  -- Level Up: active for ANY account type with a valid redemption
+  -- Level Up: active for ANY account with a valid, non-expired redemption
   SELECT EXISTS (
     SELECT 1
     FROM public.user_promo_code_redemptions upr
