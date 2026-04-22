@@ -48,3 +48,6 @@ next-env.d.ts
 
 # Supabase temp
 supabase/.temp/
+
+# Ignore full supabase config folder (local secrets/migrations)
+/supabase/

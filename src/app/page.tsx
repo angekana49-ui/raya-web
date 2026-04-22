@@ -35,6 +35,7 @@ import OnboardingModal from "@/components/modals/OnboardingModal";
 import PromoCodeModal from "@/components/modals/PromoCodeModal";
 import CreateRoomModal from "@/components/modals/CreateRoomModal";
 import JoinRoomModal from "@/components/modals/JoinRoomModal";
+import InviteRoomModal from "@/components/modals/InviteRoomModal";
 import { RayaCardModal } from "@/components/modals/RayaCardModal";
 import { LoginRecoveryModal } from "@/components/modals/LoginRecoveryModal";
 import { NoTranslate } from "@/components/ui/NoTranslate";
@@ -77,6 +78,12 @@ import {
 import type { RayaInsight } from "@/services/raya-ai.service";
 import { APP_SETTINGS_EVENT, applyReduceMotion, readAppSettings } from "@/lib/app-settings";
 import { canShowPopup, markPopupSeen } from "@/lib/popup-cadence";
+import {
+  clearActiveConversationCache,
+  hydrateCachedMessages,
+  readActiveConversationCache,
+  writeActiveConversationCache,
+} from "@/lib/conversation-cache";
 
 type PopupQueueItem = Omit<SmartPopupContent, "open" | "onClose"> & {
   durationMs?: number;
@@ -89,6 +96,10 @@ async function getAuthHeaders(): Promise<Record<string, string>> {
   const { data: { session } } = await supabase.auth.getSession();
   if (!session) return {};
   return { Authorization: `Bearer ${session.access_token}` };
+}
+
+function hasAuthHeaders(headers: Record<string, string>) {
+  return typeof headers.Authorization === "string" && headers.Authorization.length > 0;
 }
 
 function buildStudentContext(
@@ -185,7 +196,7 @@ export default function Home() {
   const turnstileSiteKey = process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY ?? "";
 
   // Auth + profile
-  const { user, loading: authLoading, signOut } = useAuth();
+  const { user, dbUserId, loading: authLoading, signOut } = useAuth();
   const { profile, updateProfile, isProfileComplete } = useUserProfile(user?.id);
   const { entitlements, setEntitlements, refresh: refreshEntitlements } = useUserEntitlements(user?.id);
   const {
@@ -290,12 +301,26 @@ export default function Home() {
     sessionAggregatorRef.current = null;
   }, []);
 
+  const restoreCachedConversation = useCallback((requestedConversationId?: string | null) => {
+    const cached = readActiveConversationCache();
+    if (!cached) return false;
+    if (requestedConversationId && cached.conversationId !== requestedConversationId) return false;
+
+    const hydratedMessages = hydrateCachedMessages(cached.messages);
+    setAllMessages(hydratedMessages);
+    setActiveConversationId(cached.conversationId);
+    setActiveLeafId(cached.activeLeafId);
+    conversationHistoryRef.current = cached.history.slice(-MAX_CONVERSATION_HISTORY);
+    return hydratedMessages.length > 0;
+  }, []);
+
   const endConversation = useCallback(async (conversationId: string) => {
     const sessionSummary = buildSessionSummary();
     resetSessionAggregator();
 
     try {
       const authHeaders = await getAuthHeaders();
+      if (!hasAuthHeaders(authHeaders)) return;
       await fetch(`/api/conversations/${conversationId}/end`, {
         method: "POST",
         headers: sessionSummary
@@ -335,7 +360,15 @@ export default function Home() {
     async function loadConversations() {
       try {
         const headers = await getAuthHeaders();
+        if (!hasAuthHeaders(headers)) {
+          setConversations([]);
+          return;
+        }
         const res = await fetch("/api/conversations", { headers });
+        if (res.status === 401) {
+          setConversations([]);
+          return;
+        }
         const { data } = await res.json();
         if (data) {
           setConversations(
@@ -348,6 +381,27 @@ export default function Home() {
     }
     loadConversations();
   }, [user]);
+
+  useEffect(() => {
+    const history = buildConversationHistoryFromLeaf(allMessages, activeLeafId).slice(-MAX_CONVERSATION_HISTORY);
+    conversationHistoryRef.current = history;
+
+    if (activeConversationId || allMessages.length > 0) {
+      writeActiveConversationCache({
+        conversationId: activeConversationId,
+        activeLeafId,
+        history,
+        messages: allMessages,
+      });
+    }
+  }, [activeConversationId, activeLeafId, allMessages]);
+
+  useEffect(() => {
+    if (activeConversationId || allMessages.length > 0) return;
+    void Promise.resolve().then(() => {
+      restoreCachedConversation();
+    });
+  }, [activeConversationId, allMessages.length, restoreCachedConversation]);
 
   useEffect(() => {
     // Keep onboarding hidden while auth modals or bypass active
@@ -976,22 +1030,31 @@ export default function Home() {
 
     try {
       const headers = await getAuthHeaders();
+      if (!hasAuthHeaders(headers)) {
+        if (!restoreCachedConversation(id)) {
+          console.warn("No auth session available to load conversation history.");
+        }
+        return;
+      }
+
       const res = await fetch(`/api/conversations/${id}`, { headers });
+      if (res.status === 401) {
+        if (!restoreCachedConversation(id)) {
+          console.warn("Conversation history request was unauthorized and no cache was available.");
+        }
+        return;
+      }
       const { data } = await res.json();
       if (data) {
         const messageRecords = data as MessageRecord[];
         setAllMessages(messageRecords.map(mapMessageRecord));
         // Find the most recent message to be the active leaf
         setActiveLeafId(getLatestLeafId(messageRecords));
-
-        // Rebuild multi-turn history for the active branch only
-        // Delay this slightly because activeMessages takes a render cycle to update
-        setTimeout(() => {
-          conversationHistoryRef.current = buildConversationHistoryFromRecords(messageRecords).slice(-MAX_CONVERSATION_HISTORY);
-        }, 0);
+        conversationHistoryRef.current = buildConversationHistoryFromRecords(messageRecords).slice(-MAX_CONVERSATION_HISTORY);
       }
     } catch (err) {
       console.error("Failed to load messages:", err);
+      restoreCachedConversation(id);
     }
   };
 
@@ -1002,10 +1065,12 @@ export default function Home() {
       setActiveConversationId(null);
       setAllMessages([]);
       setActiveLeafId(null);
+      clearActiveConversationCache();
     }
     
     try {
       const headers = await getAuthHeaders();
+      if (!hasAuthHeaders(headers)) return;
       await fetch(`/api/conversations/${id}`, { method: "DELETE", headers });
     } catch (err) {
       console.error("Failed to delete conversation:", err);
@@ -1052,6 +1117,7 @@ export default function Home() {
     setAttachedFiles([]);
     autoScrollRef.current = true;
     setShowScrollToBottom(false);
+    clearActiveConversationCache();
   };
 
 
@@ -1526,6 +1592,7 @@ export default function Home() {
                   conversationId={selectedRoom.conversationId}
                   roomId={selectedRoom.id}
                   currentUserId={user?.id}
+                  currentDbUserId={dbUserId}
                   entitlements={entitlements}
                 />
               ) : (

@@ -222,7 +222,7 @@ export async function getMessages(userId: string, conversationId: string) {
 
   const { data, error } = await supabaseAdmin
     .from('messages')
-    .select('id, sender, text, timestamp, has_files, model_used, mode_used, tokens_used, parent_id')
+    .select('id, sender, sender_user_id, text, timestamp, has_files, model_used, mode_used, tokens_used, parent_id')
     .eq('conversation_id', conversationId)
     .order('timestamp', { ascending: true })
 
@@ -236,6 +236,7 @@ export async function saveMessage(
   message: {
     sender: 'user' | 'assistant'
     text: string
+    sender_user_id?: string | null
     model_used?: string
     mode_used?: string
     tokens_used?: number

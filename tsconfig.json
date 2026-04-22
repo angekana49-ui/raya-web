@@ -30,5 +30,5 @@
     ".next/dev/types/**/*.ts",
     "**/*.mts"
   ],
-  "exclude": ["node_modules", "src/examples", "supabase"]
+  "exclude": ["node_modules", "src/examples", "supabase", "Nouveau dossier (4)"]
 }

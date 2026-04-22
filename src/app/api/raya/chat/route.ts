@@ -6,6 +6,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { RayaAIService, ProgressionState } from '@/services/raya-ai.service';
 
+import { resolveUserId } from '@/lib/auth';
+
 // Initialize RAYA service
 const getRayaInstance = () => {
   const apiKey = process.env.RAYA_API_KEY;
@@ -24,6 +26,13 @@ const getRayaInstance = () => {
 
 export async function POST(req: NextRequest) {
   try {
+    const userId = await resolveUserId(req);
+    if (!userId) {
+      return NextResponse.json(
+        { error: 'Unauthorized: Authentication required to use Raya AI.' },
+        { status: 401 }
+      );
+    }
     const body = await req.json();
     const {
       message,

@@ -315,6 +315,10 @@ const releaseRoomAiTurn = async (conversationId: string) => {
 export async function POST(req: NextRequest) {
   try {
     const userId = await resolveUserId(req);
+    if (!userId) {
+      return new Response(JSON.stringify({ error: 'Unauthorized: Authentication required to use Raya AI.' }), { status: 401 });
+    }
+
     const body = await req.json();
     const {
       message,
@@ -342,11 +346,11 @@ export async function POST(req: NextRequest) {
     if (!message || typeof message !== 'string') {
       return new Response(JSON.stringify({ error: 'Message is required' }), { status: 400 });
     }
-    
-    // Allow unauthenticated users only for ephemeral local mode, but prevent DB writes.
-    if (conversationId && !userId) {
-      return new Response(JSON.stringify({ error: 'Unauthorized conversation write' }), { status: 401 });
+
+    if (message.length > 20000) {
+      return new Response(JSON.stringify({ error: 'Message is too long (max 20000 chars)' }), { status: 413 });
     }
+
     const isRoomRequest = Boolean(roomMission);
     const requestedRoomMode = aiMode === 'passive' ? 'passive' : 'active';
     
@@ -447,11 +451,6 @@ export async function POST(req: NextRequest) {
 
     // Usage limits are enforced inside the stream (parallel with user message save) to avoid a duplicate DB round-trip here.
 
-    // Bug #6: Validate message length to prevent absurd token counts/DoD.
-    if (message.length > 20000) {
-      return new Response(JSON.stringify({ error: 'Message is too long (max 20000 chars)' }), { status: 413 });
-    }
-
     const turnId = typeof clientMessageId === 'string' && clientMessageId.trim().length > 0
       ? clientMessageId.trim()
       : `srv_${Date.now()}`;
@@ -470,6 +469,7 @@ export async function POST(req: NextRequest) {
       ? saveMessage(userId, conversationId, {
           sender: 'user',
           text: message,
+          sender_user_id: userId,
           mode_used: effectiveMode || 'normal',
           parent_id: parentId,
           action_type: actionType,

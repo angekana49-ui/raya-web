@@ -61,6 +61,16 @@ export async function GET(request: Request) {
       }
     }
 
+    // 4. Cleanup stale anonymous accounts (inactive 60+ days)
+    const { data: cleanedCount, error: cleanupError } = await supabaseAdmin.rpc('cleanup_stale_anonymous_accounts');
+    
+    if (cleanupError) {
+      console.error('Cleanup Error:', cleanupError);
+      results.push({ task: 'account_cleanup', status: 'failed', error: cleanupError.message });
+    } else {
+      results.push({ task: 'account_cleanup', status: 'success', cleaned: cleanedCount });
+    }
+
     return NextResponse.json({ success: true, processed: expiredRooms.length, results });
   } catch (err: any) {
     console.error('Cron Error:', err);

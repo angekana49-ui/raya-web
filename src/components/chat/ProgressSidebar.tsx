@@ -62,7 +62,7 @@ export default function ProgressSidebar({
       `🎓 My RAYA progress\n` +
       `🔥 ${g.streakCount} day streak\n` +
       `⚡ Level ${currentLevel} · ${levelTitle} · ${g.totalXp} XP\n` +
-      `👉 Try RAYA at raya.bluestift.com`;
+      `👉 Try RAYA at raya.thebluestift.com`;
     try {
       if (typeof navigator !== "undefined" && navigator.share) {
         await navigator.share({ text, title: "My RAYA Progress" });
@@ -105,8 +105,8 @@ export default function ProgressSidebar({
       {!userIsVerified && (
         <div
           className={`mx-3 mb-2 rounded-xl px-3 py-2.5 flex items-center gap-2.5 cursor-pointer transition-all ${hasUnsavedProgress
-              ? "bg-[linear-gradient(135deg,#fef3c7_0%,#fde68a_100%)] border border-amber-300 shadow-sm"
-              : "bg-[linear-gradient(135deg,#eef2ff_0%,#e0e7ff_100%)] border border-indigo-200"
+            ? "bg-[linear-gradient(135deg,#fef3c7_0%,#fde68a_100%)] border border-amber-300 shadow-sm"
+            : "bg-[linear-gradient(135deg,#eef2ff_0%,#e0e7ff_100%)] border border-indigo-200"
             }`}
           onClick={onVerify}
         >
@@ -169,20 +169,20 @@ export default function ProgressSidebar({
               </span>
             </div>
           </div>
-          
+
           <div className="space-y-2.5">
             <div className="flex justify-between items-end mb-1 px-0.5">
               <span className="text-[10px] font-black text-indigo-500 uppercase tracking-widest">Progress</span>
               <span className="text-[10px] font-black text-slate-600">
-                {Math.round(g.totalXp - (getLevelInfo(g.totalXp).currentLevelXp))} 
-                <span className="text-slate-300 mx-1">/</span> 
-                {getLevelInfo(g.totalXp).nextLevelXp - getLevelInfo(g.totalXp).currentLevelXp} 
+                {Math.round(g.totalXp - (getLevelInfo(g.totalXp).currentLevelXp))}
+                <span className="text-slate-300 mx-1">/</span>
+                {getLevelInfo(g.totalXp).nextLevelXp - getLevelInfo(g.totalXp).currentLevelXp}
                 <span className="ml-0.5 text-[8px] text-slate-400 uppercase tracking-wide">XP</span>
               </span>
             </div>
 
             <div className="h-3.5 w-full bg-slate-100/80 rounded-full overflow-hidden border border-slate-200/50 p-1 relative">
-              <motion.div 
+              <motion.div
                 initial={{ width: 0 }}
                 animate={{ width: `${getLevelInfo(g.totalXp).xpProgressPercent}%` }}
                 transition={{ duration: 1.2, ease: "easeOut" }}
@@ -210,15 +210,15 @@ export default function ProgressSidebar({
                 <div key={mission.id} className="group cursor-default">
                   <div className="flex items-center justify-between mb-1.5 px-0.5">
                     <div className="flex items-center gap-2">
-                       {mission.completed ? <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500" /> : <Circle className="w-3.5 h-3.5 text-slate-300" />}
-                       <span className={cn("text-[11px] font-bold", mission.completed ? "text-slate-400 line-through" : "text-slate-700")}>
-                         <NoTranslate>{mission.title}</NoTranslate>
-                       </span>
+                      {mission.completed ? <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500" /> : <Circle className="w-3.5 h-3.5 text-slate-300" />}
+                      <span className={cn("text-[11px] font-bold", mission.completed ? "text-slate-400 line-through" : "text-slate-700")}>
+                        <NoTranslate>{mission.title}</NoTranslate>
+                      </span>
                     </div>
                     <span className="text-[10px] font-black text-slate-400">{mission.current}/{mission.target}</span>
                   </div>
                   <div className="h-1.5 w-full bg-slate-100/80 rounded-full overflow-hidden border border-slate-200/50 relative">
-                    <motion.div 
+                    <motion.div
                       initial={{ width: 0 }}
                       animate={{ width: `${progress}%` }}
                       transition={{ duration: 1, ease: "easeOut" }}
@@ -236,11 +236,11 @@ export default function ProgressSidebar({
           <div>
             <p className="text-[9px] font-black text-slate-400 uppercase tracking-[0.2em] leading-none mb-2.5">Account</p>
             <div className="flex items-center justify-between">
-               <div>
-                  <p className="text-sm font-black text-slate-900">{identityReady ? accountLabel : "Student"}</p>
-                  <p className="text-[11px] font-semibold text-slate-500">{identityReady ? accountHandle : "@student"}</p>
-               </div>
-               {userIsVerified ? <CheckCircle2 className="w-4 h-4 text-emerald-500" /> : <Circle className="w-4 h-4 text-amber-500 animate-pulse" />}
+              <div>
+                <p className="text-sm font-black text-slate-900">{identityReady ? accountLabel : "Student"}</p>
+                <p className="text-[11px] font-semibold text-slate-500">{identityReady ? accountHandle : "@student"}</p>
+              </div>
+              {userIsVerified ? <CheckCircle2 className="w-4 h-4 text-emerald-500" /> : <Circle className="w-4 h-4 text-amber-500 animate-pulse" />}
             </div>
           </div>
           <div className={cn(

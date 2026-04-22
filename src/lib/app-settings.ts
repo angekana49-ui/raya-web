@@ -1,6 +1,6 @@
 "use client";
 
-export const APP_VERSION = "0.1.0";
+export const APP_VERSION = "1.0.2";
 
 export const APP_SETTINGS_EVENT = "raya:settings-changed";
 export const TIPS_ENABLED_KEY = "raya_tips_enabled_v1";

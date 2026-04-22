@@ -82,18 +82,21 @@ async function getDbUserId(): Promise<string | null> {
 }
 
 export async function getActiveRooms(): Promise<StudyRoomPreview[]> {
-  const { data, error } = await supabase
-    .from('study_rooms')
-    .select('*')
-    .eq('is_active', true)
-    .order('created_at', { ascending: false });
+  try {
+    const response = await fetch('/api/rooms/active');
+    if (!response.ok) {
+      const errorText = await response.text().catch(() => '');
+      throw new Error(errorText || `Active rooms request failed with ${response.status}`);
+    }
 
-  if (error) {
-    console.error('Error fetching active rooms:', error.message || error.code || error);
+    const payload = await response.json();
+    return Array.isArray(payload?.data)
+      ? payload.data.map((row: StudyRoomRow) => mapStudyRoomRow(row))
+      : [];
+  } catch (error: any) {
+    console.error('Error fetching active rooms:', error?.message || error?.code || error);
     return [];
   }
-
-  return ((data || []) as StudyRoomRow[]).map(mapStudyRoomRow);
 }
 
 export async function getRoomHistory(): Promise<StudyRoomPreview[]> {
@@ -147,70 +150,34 @@ export async function createStudyRoom(payload: {
   const dbUserId = await getDbUserId();
   if (!dbUserId) throw new Error('You must be signed in to create a room.');
 
-  // 1. Create a dedicated conversation for this room
-  const { data: conv, error: convError } = await supabase
-    .from('conversations')
-    .insert({
-      user_id: dbUserId,
-      title: `Room: ${payload.title}`,
-      preview: '',
-      is_active: true,
-      context_type: 'study_room'
-    })
-    .select()
-    .single();
-
-  if (convError) {
-    console.error('Failed to create room conversation:', {
-      message: convError.message,
-      code: convError.code,
-      details: convError.details,
-      hint: convError.hint,
-      dbUserId,
-      title: payload.title,
-      contextType: 'study_room',
-    });
-    throw convError;
-  }
-
-  // 2. Create the room linked to the conversation, with timer started
-  const now = new Date();
-  const endsAt = new Date(now.getTime() + payload.duration * 60 * 1000);
-
-  const { data, error } = await supabase
-    .from('study_rooms')
-    .insert({
-      created_by: dbUserId,
-      title: payload.title,
-      mission: payload.mission,
-      duration: payload.duration,
-      ai_mode: payload.aiMode,
-      files: payload.files,
-      online_count: 1,
-      is_active: true,
-      conversation_id: conv.id,
-      timer_status: 'running',
-      timer_started_at: now.toISOString(),
-      timer_ends_at: endsAt.toISOString(),
-    })
-    .select()
-    .single();
+  // Use the RPC function to create the study room
+  const { data, error } = await supabase.rpc('create_study_room', {
+    p_title: payload.title,
+    p_mission: payload.mission,
+    p_duration: payload.duration,
+    p_ai_mode: payload.aiMode,
+    p_max_members: 8, // default
+  });
 
   if (error) {
-    console.error('Failed to create study room row:', {
-      message: error.message,
-      code: error.code,
-      details: error.details,
-      hint: error.hint,
-      dbUserId,
-      conversationId: conv.id,
-      title: payload.title,
-      duration: payload.duration,
-      aiMode: payload.aiMode,
-      filesCount: payload.files.length,
-    });
-    await supabase.from('conversations').delete().eq('id', conv.id);
-    throw error;
+    try {
+      console.error('Failed to create study room row:', {
+        error: typeof error === 'object' ? JSON.parse(JSON.stringify(error)) : String(error),
+        message: (error as any)?.message ?? null,
+        code: (error as any)?.code ?? null,
+        details: (error as any)?.details ?? null,
+        hint: (error as any)?.hint ?? null,
+        dbUserId,
+        title: payload.title,
+        duration: payload.duration,
+        aiMode: payload.aiMode,
+      });
+    } catch (logErr) {
+      console.error('Failed to stringify RPC error:', logErr, 'original:', error);
+    }
+
+    const errMsg = (error as any)?.message || JSON.stringify(error) || 'Unknown RPC error';
+    throw new Error(errMsg);
   }
   return data;
 }

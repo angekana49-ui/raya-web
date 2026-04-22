@@ -328,8 +328,12 @@ export function useStudyRooms({
       setActiveRoomIdState(createdRoom.id);
       setCreateRoomModalOpen(false);
     } catch (err) {
-      console.error('Failed to create room in DB:', err);
-      setRoomError("Could not create study room. Please try again.");
+      try {
+        console.error('Failed to create room in DB:', (err as any)?.message ?? JSON.parse(JSON.stringify(err)));
+      } catch (logErr) {
+        console.error('Failed to create room in DB (unstringifiable):', err, 'log error:', logErr);
+      }
+      setRoomError(((err as any)?.message) ? String((err as any).message) : "Could not create study room. Please try again.");
     }
   }, []);
 

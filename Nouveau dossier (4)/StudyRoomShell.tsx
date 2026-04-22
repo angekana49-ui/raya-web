@@ -14,8 +14,7 @@ import { Loader2 } from "lucide-react";
 import { supabase } from "@/lib/supabase/client";
 import { advanceStudyRoomTimer, syncRoomOnlineCount } from "@/services/study-rooms.service";
 import { DEFAULT_USER_ENTITLEMENTS } from "@/lib/user-entitlements";
-import { useRoomSession, type RoomMessage } from "@/hooks/useRoomSession";
-import { roomMessageToEvent } from "@/lib/roomMessageAdapter";
+import { useRoomSession } from "@/hooks/useRoomSession";
 
 type RoomMember = {
   id: string;
@@ -60,6 +59,7 @@ interface StudyRoomShellProps {
   conversationId?: string;
   roomId?: string;
   currentUserId?: string;
+  /** public.users.id (pas auth.uid) — nécessaire pour identifier l'auteur des messages */
   currentDbUserId?: string | null;
   onReturnToLobby?: () => void;
   entitlements?: UserEntitlements;
@@ -113,12 +113,16 @@ export default function StudyRoomShell({
   const [draft, setDraft] = useState("");
   const [infoOpen, setInfoOpen] = useState(false);
   const [headerExpanded, setHeaderExpanded] = useState(false);
+  const [typingMembers, setTypingMembers] = useState<string[]>([]);
   const [momentum, setMomentum] = useState<"Low" | "Moderate" | "High" | "Deep Focus">("Moderate");
   const [headerPulse, setHeaderPulse] = useState(false);
   const [showScrollToBottom, setShowScrollToBottom] = useState(false);
   const feedRef = useRef<HTMLDivElement | null>(null);
   const [roomFiles, setRoomFiles] = useState<AttachedFile[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const presenceKeyRef = useRef(
+    currentUserId || `guest-${Math.random().toString(36).slice(2, 10)}`,
+  );
   const pendingActionTypeRef = useRef<string | undefined>(undefined);
   const pendingTurnRef = useRef<{
     clientMessageId: string;
@@ -159,91 +163,6 @@ export default function StudyRoomShell({
     setMomentum("Moderate");
   }, [roomName]);
 
-  const {
-    participants,
-    participantLookup,
-    typingMembers,
-    onlineCount: sessionOnlineCount,
-    connectionState,
-    notifyDraftActivity,
-  } = useRoomSession({
-    roomId,
-    conversationId,
-    currentUserId,
-    currentDbUserId,
-    onInitialMessages: (messages, lookup) => {
-      if (messages.length === 0) return;
-      setRoomMessages(
-        messages.map((message) =>
-          roomMessageToEvent(message, currentDbUserId, lookup),
-        ),
-      );
-    },
-    onMessageInserted: (message: RoomMessage, lookup) => {
-      setRoomMessages((prev) => {
-        if (prev.some((entry) => entry.id === message.id)) return prev;
-
-        const pendingTurn = pendingTurnRef.current;
-        if (
-          message.sender === "user" &&
-          pendingTurn &&
-          pendingTurn.userText === message.text &&
-          !!currentDbUserId &&
-          message.senderUserId === currentDbUserId
-        ) {
-          pendingTurnRef.current = {
-            ...pendingTurn,
-            userTempId: message.id,
-          };
-          return prev.map((entry) =>
-            entry.id === pendingTurn.userTempId
-              ? { ...entry, id: message.id, title: "You", meta: "Just now" }
-              : entry,
-          );
-        }
-
-        if (message.sender === "assistant" && pendingTurn?.assistantTempId) {
-          return prev.map((entry) =>
-            entry.id === pendingTurn.assistantTempId
-              ? {
-                  ...entry,
-                  id: message.id,
-                  body: message.text,
-                  meta: message.modelUsed || "Moderator",
-                }
-              : entry,
-          );
-        }
-
-        return [...prev, roomMessageToEvent(message, currentDbUserId, lookup)];
-      });
-    },
-    onSystemEvent: (body) => {
-      setRoomMessages((prev) => [
-        ...prev,
-        {
-          id: `system-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-          type: "system",
-          title: "Raya rooms",
-          body,
-          meta: "Live",
-        },
-      ]);
-    },
-  });
-
-  useEffect(() => {
-    notifyDraftActivity(draft);
-  }, [draft, notifyDraftActivity]);
-
-  useEffect(() => {
-    if (sessionOnlineCount == null) return;
-    setLiveOnlineCount(sessionOnlineCount);
-    if (roomId) {
-      void syncRoomOnlineCount(roomId, sessionOnlineCount);
-    }
-  }, [roomId, sessionOnlineCount]);
-
   useEffect(() => {
     if (timerStatus === "finished") {
       setRemainingMs(0);
@@ -264,6 +183,126 @@ export default function StudyRoomShell({
     const interval = window.setInterval(tick, 1000);
     return () => window.clearInterval(interval);
   }, [durationMinutes, timerEndsAt, timerStatus]);
+
+  // ── useRoomSession : messages live + présence des membres ──────────────────
+  const {
+    messages: liveMessages,
+    participants: liveParticipants,
+  } = useRoomSession({
+    roomId: roomId ?? null,
+    conversationId: conversationId ?? null,
+    currentDbUserId,
+    enabled: !!conversationId && !!roomId,
+  });
+
+  // Sync les messages live dans roomMessages (en préservant les messages
+  // optimistes, les events système/timer et les messages streamés en cours)
+  useEffect(() => {
+    if (liveMessages.length === 0) return;
+
+    setRoomMessages((prev) => {
+      // Garder les events système/timer/reward qui ne viennent pas de la DB
+      const localOnly = prev.filter(
+        (e) =>
+          e.type === "system" ||
+          e.type === "reward" ||
+          e.id.startsWith("timer-") ||
+          e.id.startsWith("sys-") ||
+          e.id.startsWith("skip-") ||
+          e.id.startsWith("err-"),
+      );
+
+      // Convertir les messages DB en RoomEvent
+      const dbEvents: RoomEvent[] = liveMessages.map((m) => {
+        if (m.sender === "assistant") {
+          return {
+            id: m.id,
+            type: "ai",
+            title: "RAYA Host",
+            body: m.text,
+            meta: "Moderator",
+          };
+        }
+
+        // Identifier si c'est le message de l'utilisateur courant
+        const isOwn =
+          m.id.startsWith("optimistic-") ||
+          (!!currentDbUserId && (m as any).senderUserId === currentDbUserId);
+
+        if (isOwn) {
+          return { id: m.id, type: "user", title: "You", body: m.text, meta: "Just now" };
+        }
+
+        // Trouver l'auteur parmi les participants
+        const COLORS = ["#7c3aed", "#059669", "#dc2626", "#d97706", "#0891b2", "#be185d"];
+        const sorted = [...liveParticipants].sort(
+          (a, b) => new Date(a.joinedAt).getTime() - new Date(b.joinedAt).getTime(),
+        );
+        const author = sorted.find((p) => p.userId === (m as any).senderUserId);
+        const colorIdx = author ? sorted.indexOf(author) % COLORS.length : 0;
+
+        return {
+          id: m.id,
+          type: "user",
+          title: author?.displayName ?? "Teammate",
+          body: m.text,
+          meta: "Just now",
+          accent: COLORS[colorIdx],
+        };
+      });
+
+      // Fusionner : DB events d'abord, puis events locaux qui ne sont pas déjà dans la DB
+      const dbIds = new Set(dbEvents.map((e) => e.id));
+      const uniqueLocal = localOnly.filter((e) => !dbIds.has(e.id));
+
+      return [...dbEvents, ...uniqueLocal].sort((a, b) => {
+        // Garder les events locaux à la fin (pas de timestamp fiable)
+        const aIsLocal =
+          a.id.startsWith("timer-") || a.id.startsWith("sys-") || a.id.startsWith("skip-") || a.id.startsWith("err-");
+        const bIsLocal =
+          b.id.startsWith("timer-") || b.id.startsWith("sys-") || b.id.startsWith("skip-") || b.id.startsWith("err-");
+        if (aIsLocal && !bIsLocal) return 1;
+        if (!aIsLocal && bIsLocal) return -1;
+        return 0;
+      });
+    });
+  }, [liveMessages, liveParticipants, currentDbUserId]);
+
+  // Sync les participants live dans liveOnlineCount
+  useEffect(() => {
+    if (liveParticipants.length > 0) {
+      setLiveOnlineCount(liveParticipants.length);
+    }
+  }, [liveParticipants]);
+
+  // ── Presence Supabase (pour syncRoomOnlineCount) ───────────────────────────
+  useEffect(() => {
+    if (!conversationId || !roomId) return;
+
+    const channel = supabase
+      .channel(`room-presence:${roomId}`, {
+        config: { presence: { key: presenceKeyRef.current } },
+      })
+      .on("presence", { event: "sync" }, () => {
+        const count = Object.keys(channel.presenceState()).length;
+        setLiveOnlineCount(count);
+        void syncRoomOnlineCount(roomId, count);
+      })
+      .subscribe(async (status) => {
+        if (status === "SUBSCRIBED") {
+          await channel.track({
+            user_id: currentUserId ?? null,
+            online_at: new Date().toISOString(),
+          });
+          supabase.rpc("increment_room_online_count", { room_id: roomId });
+        }
+      });
+
+    return () => {
+      supabase.rpc("decrement_room_online_count", { room_id: roomId });
+      void supabase.removeChannel(channel);
+    };
+  }, [conversationId, roomId, currentUserId]);
 
   // Momentum and typing activity are now tied to real events
   useEffect(() => {
@@ -734,19 +773,6 @@ export default function StudyRoomShell({
   const totalSeconds = Math.max(0, Math.ceil(remainingMs / 1000));
   const minutes = Math.floor(totalSeconds / 60);
   const seconds = totalSeconds % 60;
-  const liveMembers =
-    participants.length > 0
-      ? participants.map((participant, index) => ({
-          id: participant.id,
-          name: participant.displayName || participantLookup[participant.userId] || "Member",
-          accent: `linear-gradient(135deg, ${
-            ["#2563eb", "#7c3aed", "#059669", "#dc2626", "#d97706", "#0891b2", "#be185d", "#65a30d"][index % 8]
-          }, ${
-            ["#60a5fa", "#a78bfa", "#34d399", "#f87171", "#fbbf24", "#22d3ee", "#f472b6", "#a3e635"][index % 8]
-          })`,
-          status: "ready" as const,
-        }))
-      : members;
   const timeLeftLabel =
     timerStatus === "finished"
       ? "00:00"
@@ -967,22 +993,6 @@ export default function StudyRoomShell({
                     <span className="rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[10px] font-semibold text-slate-600">
                       {Math.min(liveOnlineCount, maxMembers)}/{maxMembers} online
                     </span>
-                    <span
-                      className={cn(
-                        "rounded-full border px-2.5 py-1 text-[10px] font-semibold",
-                        connectionState === "connected"
-                          ? "border-emerald-200 bg-emerald-50 text-emerald-700"
-                          : connectionState === "reconnecting"
-                            ? "border-amber-200 bg-amber-50 text-amber-700"
-                            : "border-slate-200 bg-slate-100 text-slate-500",
-                      )}
-                    >
-                      {connectionState === "connected"
-                        ? "Live"
-                        : connectionState === "reconnecting"
-                          ? "Reconnecting..."
-                          : "Connecting..."}
-                    </span>
                     <motion.span
                       animate={headerPulse ? { scale: [1, 1.1, 1], backgroundColor: ["#f5f3ff", "#ddd6fe", "#f5f3ff"] } : {}}
                       className="rounded-full border border-violet-200 bg-violet-50 px-2.5 py-1 text-[10px] font-semibold text-violet-700"
@@ -1079,25 +1089,35 @@ export default function StudyRoomShell({
 
                   <div className="min-w-0 flex-1">
                     <div className="flex flex-wrap gap-2">
-                      {liveMembers.map((member) => (
-                        <div
-                          key={member.id}
-                          className="flex items-center gap-2 rounded-full border border-slate-200 bg-white px-2.5 py-1.5 shadow-sm"
-                        >
-                          <span
-                            className="flex h-7 w-7 items-center justify-center rounded-full text-[10px] font-black text-white"
-                            style={{ background: member.accent }}
+                      {(liveParticipants.length > 0 ? liveParticipants : members).map((p, idx) => {
+                        const COLORS = ["#2563eb", "#7c3aed", "#059669", "#dc2626", "#d97706", "#0891b2", "#be185d", "#65a30d"];
+                        // Support les deux formats : RoomParticipant (live) et RoomMember (statique)
+                        const isLive = "userId" in p;
+                        const name = isLive ? (p.displayName ?? "Member") : (p as any).name;
+                        const accent = isLive ? COLORS[idx % COLORS.length] : (p as any).accent;
+                        const isMe = isLive && p.userId === currentDbUserId;
+                        const label = isMe ? "You" : name;
+                        const status = isLive ? (p.isCreator ? "Host" : "Ready") : statusLabel[(p as any).status];
+                        return (
+                          <div
+                            key={p.id}
+                            className="flex items-center gap-2 rounded-full border border-slate-200 bg-white px-2.5 py-1.5 shadow-sm"
                           >
-                            {member.name.slice(0, 1).toUpperCase()}
-                          </span>
-                          <div className="min-w-0">
-                            <p className="truncate text-[11px] font-bold text-slate-800">{member.name}</p>
-                            <p className="text-[9px] font-semibold uppercase tracking-wide text-slate-400">
-                              {statusLabel[member.status]}
-                            </p>
+                            <span
+                              className="flex h-7 w-7 items-center justify-center rounded-full text-[10px] font-black text-white"
+                              style={{ background: accent }}
+                            >
+                              {label.slice(0, 1).toUpperCase()}
+                            </span>
+                            <div className="min-w-0">
+                              <p className="truncate text-[11px] font-bold text-slate-800">{label}</p>
+                              <p className="text-[9px] font-semibold uppercase tracking-wide text-slate-400">
+                                {status}
+                              </p>
+                            </div>
                           </div>
-                        </div>
-                      ))}
+                        );
+                      })}
                     </div>
                   </div>
                 </div>
