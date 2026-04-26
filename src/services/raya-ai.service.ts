@@ -324,11 +324,26 @@ Stay warm, encouraging, and direct. Use LaTeX for math ($...$).`;
       content: userMessage,
     });
 
-    // Build config
-    const config = this.buildGeminiConfig({ systemInstruction: this.systemPrompt });
+    // Try context caching (static §1–13 cached on Gemini servers)
+    const cacheName = await this.tryGetOrCreateCache();
 
-    // Build contents
-    const contents = this.buildGeminiContents();
+    // Determine thinking level
+    const thinkingLevel = this.shouldEnableThinking(userMessage) ? this.config.thinkingLevel : 'NONE';
+
+    // Build config
+    const config = cacheName
+      ? this.buildGeminiConfig({ cachedContent: cacheName, thinkingLevel })
+      : this.buildGeminiConfig({ systemInstruction: this.systemPrompt, thinkingLevel });
+
+    // When using cache, inject §14 student context as the first exchange in contents
+    const historyContents = this.buildGeminiContents();
+    let contents = (cacheName && this.config.studentContext)
+      ? [
+          { role: 'user',  parts: [{ text: `[Session context]\n${this.config.studentContext}` }] },
+          { role: 'model', parts: [{ text: 'Compris.' }] },
+          ...historyContents,
+        ]
+      : historyContents;
 
     // Generate response
     const response = await this.geminiClient.models.generateContent({
@@ -423,10 +438,13 @@ Stay warm, encouraging, and direct. Use LaTeX for math ($...$).`;
     // Try context caching (static §1–13 cached on Gemini servers)
     const cacheName = await this.tryGetOrCreateCache();
 
+    // Determine thinking level
+    const thinkingLevel = this.shouldEnableThinking(userMessage) ? this.config.thinkingLevel : 'NONE';
+
     // Build config
     const config = cacheName
-      ? this.buildGeminiConfig({ cachedContent: cacheName })
-      : this.buildGeminiConfig({ systemInstruction: this.systemPrompt });
+      ? this.buildGeminiConfig({ cachedContent: cacheName, thinkingLevel })
+      : this.buildGeminiConfig({ systemInstruction: this.systemPrompt, thinkingLevel });
 
     // When using cache, inject §14 student context as the first exchange in contents
     // (it wasn't included in the cached static prompt)
@@ -569,12 +587,21 @@ Stay warm, encouraging, and direct. Use LaTeX for math ($...$).`;
       content: `[IMAGE] ${userMessage}`,
     });
 
+    // Try context caching
+    const cacheName = await this.tryGetOrCreateCache();
+
+    // Determine thinking level
+    const thinkingLevel = this.shouldEnableThinking(userMessage) ? this.config.thinkingLevel : 'NONE';
+
     // Build config
-    const config = this.buildGeminiConfig({ systemInstruction: this.systemPrompt });
+    const config = cacheName
+      ? this.buildGeminiConfig({ cachedContent: cacheName, thinkingLevel })
+      : this.buildGeminiConfig({ systemInstruction: this.systemPrompt, thinkingLevel });
 
     // Build contents with image
-    const contents = [
-      ...this.buildGeminiContents().slice(0, -1), // Exclude last message
+    const historyContents = this.buildGeminiContents();
+    let contents = [
+      ...historyContents.slice(0, -1), // Exclude last message
       {
         role: 'user',
         parts: [
@@ -588,6 +615,15 @@ Stay warm, encouraging, and direct. Use LaTeX for math ($...$).`;
         ],
       },
     ];
+
+    // Inject student context if using cache
+    if (cacheName && this.config.studentContext) {
+      contents = [
+        { role: 'user',  parts: [{ text: `[Session context]\n${this.config.studentContext}` }] },
+        { role: 'model', parts: [{ text: 'Compris.' }] },
+        ...contents,
+      ];
+    }
 
     const response = await this.geminiClient.models.generateContent({
       model: this.config.model,
@@ -764,9 +800,12 @@ Stay warm, encouraging, and direct. Use LaTeX for math ($...$).`;
       HIGH: ThinkingLevel.HIGH,
     };
     
-    // If thinkingLevel is NONE, we don't pass a thinkingConfig at all
-    const thinkingLevel = this.config.thinkingLevel
-      ? levelMap[this.config.thinkingLevel.toUpperCase()]
+    // Check if thinking is explicitly disabled or overridden in this call
+    const requestedLevel = (overrides.thinkingLevel as string) || this.config.thinkingLevel;
+    const isThinkingDisabled = requestedLevel?.toUpperCase() === 'NONE';
+
+    const thinkingLevel = !isThinkingDisabled && requestedLevel
+      ? levelMap[requestedLevel.toUpperCase()]
       : ThinkingLevel.MEDIUM;
       
     const cfg: Record<string, unknown> = {
@@ -775,7 +814,10 @@ Stay warm, encouraging, and direct. Use LaTeX for math ($...$).`;
       ...overrides,
     };
     
-    if (this.config.thinkingLevel?.toUpperCase() !== 'NONE' && thinkingLevel) {
+    // Remove thinkingLevel from overrides as it's not a valid Gemini config key
+    delete cfg.thinkingLevel;
+
+    if (!isThinkingDisabled && thinkingLevel) {
        cfg.thinkingConfig = { thinkingLevel };
     }
 
@@ -795,6 +837,28 @@ Stay warm, encouraging, and direct. Use LaTeX for math ($...$).`;
 
   public getProvider(): AIProvider {
     return this.provider;
+  }
+
+  /**
+   * Heuristic to determine if the message requires "thinking" tokens.
+   * Simple greetings or very short messages don't need academic reasoning.
+   */
+  public shouldEnableThinking(message: string): boolean {
+    const text = message.toLowerCase().trim();
+    
+    // List of "simple" patterns that don't need thinking
+    const simplePatterns = [
+      /^salut/i, /^bonjour/i, /^coucou/i, /^hello/i, /^hi/i,
+      /^ça va/i, /^comment vas-tu/i, /^comment ca va/i,
+      /^merci/i, /^thanks/i, /^ok/i, /^d'accord/i,
+      /^oui/i, /^non/i, /^yes/i, /^no/i,
+      /^\?+$/, /^!+$/
+    ];
+
+    if (text.length < 12) return false;
+    if (simplePatterns.some(p => p.test(text))) return false;
+    
+    return true;
   }
 }
 

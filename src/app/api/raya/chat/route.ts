@@ -5,8 +5,10 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { RayaAIService, ProgressionState } from '@/services/raya-ai.service';
-
 import { resolveUserId } from '@/lib/auth';
+import { supabaseAdmin } from '@/lib/supabase/server';
+
+const MAX_HISTORY_MESSAGES = 40;
 
 // Initialize RAYA service
 const getRayaInstance = () => {
@@ -40,6 +42,7 @@ export async function POST(req: NextRequest) {
       progressionState,
       conversationHistory,
       sessionId,
+      conversationId, // Ajouté
     } = body;
 
     // Validation
@@ -53,10 +56,33 @@ export async function POST(req: NextRequest) {
     // Initialize RAYA
     const raya = getRayaInstance();
 
-    // Restore conversation history if provided
-    if (conversationHistory && Array.isArray(conversationHistory)) {
-      raya.setHistory(conversationHistory);
+    // Restore history from client or Supabase
+    let safeConversationHistory = Array.isArray(conversationHistory)
+      ? conversationHistory.slice(-MAX_HISTORY_MESSAGES)
+      : [];
+
+    if (safeConversationHistory.length < 2 && conversationId && userId) {
+      try {
+        const { data: dbMessages } = await supabaseAdmin
+          .from('messages')
+          .select('sender, text')
+          .eq('conversation_id', conversationId)
+          .order('timestamp', { ascending: false })
+          .limit(MAX_HISTORY_MESSAGES);
+        
+        if (dbMessages && dbMessages.length > 0) {
+          safeConversationHistory = dbMessages.reverse().map((m: any) => ({
+            role: m.sender === 'assistant' ? 'assistant' : 'user',
+            content: m.text,
+          }));
+          console.log(`[RAYA] Restored ${safeConversationHistory.length} messages from DB.`);
+        }
+      } catch (err) {
+        console.warn('[RAYA] History restoration failed:', err);
+      }
     }
+
+    raya.setHistory(safeConversationHistory);
 
     // Get response
     const response = await raya.chat(

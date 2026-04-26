@@ -24,7 +24,7 @@ import path from 'path';
 const RULE_VERSION = 'v2';
 const DAILY_XP_CAP = 500;
 const MISSION_MIN_THRESHOLD = 0.35;
-const MAX_HISTORY_MESSAGES = 20;
+const MAX_HISTORY_MESSAGES = 40;
 const MAX_FILE_PAYLOADS = 3;
 const ROOM_AI_TURN_STALE_MS = 90_000;
 const SOLO_SYSTEM_PROMPT_PATH = path.join(process.cwd(), 'prompts/RAYA_v3.0_SYSTEM_PROMPT.md');
@@ -338,9 +338,35 @@ export async function POST(req: NextRequest) {
     const filePayloads: FilePayload[] | undefined = Array.isArray(files) && files.length > 0
       ? files.slice(0, MAX_FILE_PAYLOADS)
       : undefined;
-    const safeConversationHistory = Array.isArray(conversationHistory)
+    
+    // 0. Restore history from Supabase if client-provided history is empty or short
+    let safeConversationHistory = Array.isArray(conversationHistory)
       ? conversationHistory.slice(-MAX_HISTORY_MESSAGES)
-      : undefined;
+      : [];
+
+    if (safeConversationHistory.length < 2 && conversationId && userId) {
+      try {
+        const { data: dbMessages } = await supabaseAdmin
+          .from('messages')
+          .select('sender, text')
+          .eq('conversation_id', conversationId)
+          .order('timestamp', { ascending: false })
+          .limit(MAX_HISTORY_MESSAGES);
+        
+        if (dbMessages && dbMessages.length > 0) {
+          // Reverse because we fetched descending
+          const restored = dbMessages.reverse().map((m: any) => ({
+            role: m.sender === 'assistant' ? 'assistant' : 'user',
+            content: m.text,
+          }));
+          safeConversationHistory = restored;
+          console.log(`[RAYA] Restored ${restored.length} messages from Supabase for context.`);
+        }
+      } catch (err) {
+        console.warn('[RAYA] Failed to restore history from DB:', err);
+      }
+    }
+
     const requestedFileUploads = estimateFileUploadCount(filePayloads);
 
     if (!message || typeof message !== 'string') {
