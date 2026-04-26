@@ -90,7 +90,7 @@ type PopupQueueItem = Omit<SmartPopupContent, "open" | "onClose"> & {
 };
 
 const MAX_CONVERSATION_HISTORY = 20;
-const STREAM_REQUEST_TIMEOUT_MS = 45000;
+const STREAM_REQUEST_TIMEOUT_MS = 30000; // Réduit à 30s pour éviter l'impression de boucle infinie
 
 async function getAuthHeaders(): Promise<Record<string, string>> {
   const { data: { session } } = await supabase.auth.getSession();
@@ -280,6 +280,7 @@ export default function Home() {
   const sessionTurnCount = useRef(0);
   const pendingAnalysis = useRef<MessageAnalysis | null>(null);
   const sessionAggregatorRef = useRef<SessionAggregator | null>(null);
+  const abortControllerRef = useRef<AbortController | null>(null);
   // Conversation history for multi-turn memory (reset on new/switched conversation)
   const conversationHistoryRef = useRef<unknown[]>([]);
 
@@ -749,7 +750,15 @@ export default function Home() {
         // Call streaming API
         const authHeaders = await getAuthHeaders();
         const controller = new AbortController();
-        const timeoutId = window.setTimeout(() => controller.abort(), STREAM_REQUEST_TIMEOUT_MS);
+        abortControllerRef.current = controller;
+
+        const timeoutId = window.setTimeout(() => {
+          if (abortControllerRef.current === controller) {
+            controller.abort();
+            console.warn("[RAYA] Request timed out after", STREAM_REQUEST_TIMEOUT_MS, "ms");
+          }
+        }, STREAM_REQUEST_TIMEOUT_MS);
+
         let res: Response;
         try {
           res = await fetch("/api/raya/stream", {
@@ -920,6 +929,9 @@ export default function Home() {
           }
         } finally {
           reader.releaseLock();
+          if (abortControllerRef.current === controller) {
+            abortControllerRef.current = null;
+          }
         }
 
         if (!streamHadError) {
@@ -977,6 +989,15 @@ export default function Home() {
     },
     [activeConversationId, aiMode, selectedModel, entitlements.hasPremiumAccess, gamOnExchangeEvaluated, gamification.state, getSessionAggregator, profile]
   );
+
+  const handleStopGeneration = useCallback(() => {
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+      abortControllerRef.current = null;
+      setIsTyping(false);
+      console.log("[RAYA] Generation interrupted by user.");
+    }
+  }, []);
 
   const handleSend = () => {
     if (isTyping) return;
@@ -1649,8 +1670,9 @@ export default function Home() {
                 onFileButtonPress={() => setFileMenuVisible(true)}
                 onAIOptionsPress={() => setAiMenuVisible(true)}
                 onModelPress={() => setModelMenuVisible(true)}
-                onVoicePress={handleVoicePress}
-                onRemoveFile={handleRemoveFile}
+              onVoicePress={handleVoicePress}
+              onStopGeneration={handleStopGeneration}
+              onRemoveFile={handleRemoveFile}
                 onAnchorsChange={({ fileButton, aiButton, modelButton }) => {
                   setFileMenuAnchor(fileButton);
                   setAiMenuAnchor(aiButton);

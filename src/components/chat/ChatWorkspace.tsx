@@ -34,6 +34,7 @@ interface ChatWorkspaceProps {
   onNavigateBranch: (messageId: string, direction: "prev" | "next") => void;
   onChangeText: (value: string) => void;
   onSend: () => void;
+  onStopGeneration: () => void;
   onFileButtonPress: () => void;
   onAIOptionsPress: () => void;
   onModelPress: () => void;
@@ -88,6 +89,7 @@ export default function ChatWorkspace({
   onNavigateBranch,
   onChangeText,
   onSend,
+  onStopGeneration,
   onFileButtonPress,
   onAIOptionsPress,
   onModelPress,
@@ -167,6 +169,7 @@ export default function ChatWorkspace({
             value={input}
             onChangeText={onChangeText}
             onSend={onSend}
+            onStopGeneration={onStopGeneration}
             onFileButtonPress={onFileButtonPress}
             onAIOptionsPress={onAIOptionsPress}
             onModelPress={onModelPress}
@@ -175,6 +178,8 @@ export default function ChatWorkspace({
             onRemoveFile={onRemoveFile}
             aiMode={aiMode}
             selectedModel={selectedModel}
+            disabled={isTyping}
+            isTyping={isTyping}
             onAnchorsChange={onAnchorsChange}
           />
         </div>

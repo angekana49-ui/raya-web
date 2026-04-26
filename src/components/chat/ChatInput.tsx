@@ -1,7 +1,7 @@
 "use client";
 
 import { useRef, useEffect, useState } from "react";
-import { Paperclip, Plus, Send, Mic, Zap, Brain, Sparkles, Cpu, Bot } from "lucide-react";
+import { Paperclip, Plus, Send, Mic, Zap, Brain, Sparkles, Cpu, Bot, Square } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import type { AttachedFile } from "@/types";
 import FileAttachment from "./FileAttachment";
@@ -11,6 +11,7 @@ interface ChatInputProps {
   value: string;
   onChangeText: (text: string) => void;
   onSend: () => void;
+  onStopGeneration?: () => void;
   onFileButtonPress: () => void;
   onAIOptionsPress?: () => void;
   onVoicePress: () => void;
@@ -20,6 +21,7 @@ interface ChatInputProps {
   selectedModel?: string;
   onModelPress?: () => void;
   disabled?: boolean;
+  isTyping?: boolean;
   placeholder?: string;
   onAnchorsChange?: (anchors: {
     fileButton: HTMLButtonElement | null;
@@ -32,6 +34,7 @@ export default function ChatInput({
   value,
   onChangeText,
   onSend,
+  onStopGeneration,
   onFileButtonPress,
   onAIOptionsPress,
   onVoicePress,
@@ -41,6 +44,7 @@ export default function ChatInput({
   aiMode = "normal",
   selectedModel = "gpt-4o",
   disabled = false,
+  isTyping = false,
   placeholder = "Message RAYA...",
   onAnchorsChange,
 }: ChatInputProps) {
@@ -225,21 +229,42 @@ export default function ChatInput({
               <Mic className="w-5 h-5" />
             </motion.button>
 
-            <motion.button
-              whileHover={canSend ? { scale: 1.02 } : {}}
-              whileTap={canSend ? { scale: 0.95 } : {}}
-              onClick={onSend}
-              disabled={!canSend}
-              className={cn(
-                "h-10 px-5 flex items-center gap-2 rounded-2xl transition-all shadow-md active:shadow-sm font-bold text-sm",
-                canSend
-                  ? "bg-slate-900 text-white shadow-slate-200"
-                  : "bg-slate-100 text-slate-300 shadow-transparent"
+            <AnimatePresence mode="wait">
+              {isTyping ? (
+                <motion.button
+                  key="stop-button"
+                  initial={{ opacity: 0, scale: 0.9 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  exit={{ opacity: 0, scale: 0.9 }}
+                  whileTap={{ scale: 0.95 }}
+                  onClick={onStopGeneration}
+                  className="h-10 px-5 flex items-center gap-2 rounded-2xl bg-rose-50 text-rose-600 border border-rose-100 transition-all shadow-sm font-bold text-sm hover:bg-rose-100"
+                >
+                  <span>Stop</span>
+                  <Square className="w-3.5 h-3.5 fill-current" />
+                </motion.button>
+              ) : (
+                <motion.button
+                  key="send-button"
+                  initial={{ opacity: 0, scale: 0.9 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  exit={{ opacity: 0, scale: 0.9 }}
+                  whileHover={canSend ? { scale: 1.02 } : {}}
+                  whileTap={canSend ? { scale: 0.95 } : {}}
+                  onClick={onSend}
+                  disabled={!canSend}
+                  className={cn(
+                    "h-10 px-5 flex items-center gap-2 rounded-2xl transition-all shadow-md active:shadow-sm font-bold text-sm",
+                    canSend
+                      ? "bg-slate-900 text-white shadow-slate-200"
+                      : "bg-slate-100 text-slate-300 shadow-transparent"
+                  )}
+                >
+                  <span>Send</span>
+                  <Send className="w-4 h-4" />
+                </motion.button>
               )}
-            >
-              <span>Send</span>
-              <Send className="w-4 h-4" />
-            </motion.button>
+            </AnimatePresence>
           </div>
         </div>
       </div>
