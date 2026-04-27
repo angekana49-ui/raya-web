@@ -1,6 +1,7 @@
 import type { Message } from "@/types";
 
 const ACTIVE_CONVERSATION_CACHE_KEY = "raya_active_conversation_cache_v1";
+const CONVERSATIONS_LIST_CACHE_KEY = "raya_conversations_list_cache_v1";
 
 type CachedMessage = {
   id: string;
@@ -71,6 +72,34 @@ export function clearActiveConversationCache() {
     window.localStorage.removeItem(ACTIVE_CONVERSATION_CACHE_KEY);
   } catch {
     // ignore storage errors
+  }
+}
+
+export function writeConversationsListCache(conversations: any[]) {
+  if (!isBrowser()) return;
+  try {
+    const serializable = conversations.map(c => ({
+      ...c,
+      date: c.date instanceof Date ? c.date.toISOString() : c.date
+    }));
+    window.localStorage.setItem(CONVERSATIONS_LIST_CACHE_KEY, JSON.stringify(serializable));
+  } catch {
+    // ignore
+  }
+}
+
+export function readConversationsListCache(): any[] | null {
+  if (!isBrowser()) return null;
+  try {
+    const raw = window.localStorage.getItem(CONVERSATIONS_LIST_CACHE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    return parsed.map((c: any) => ({
+      ...c,
+      date: new Date(c.date)
+    }));
+  } catch {
+    return null;
   }
 }
 

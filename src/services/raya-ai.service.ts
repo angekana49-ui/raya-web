@@ -806,11 +806,12 @@ Stay warm, encouraging, and direct. Use LaTeX for math ($...$).`;
 
     const thinkingLevel = !isThinkingDisabled && requestedLevel
       ? levelMap[requestedLevel.toUpperCase()]
-      : ThinkingLevel.MEDIUM;
+      : ThinkingLevel.LOW;
       
     const cfg: Record<string, unknown> = {
       temperature: this.config.temperature,
       topP: this.config.topP,
+      maxOutputTokens: this.config.maxTokens || 4096, // Assurer un max tokens
       ...overrides,
     };
     
@@ -818,7 +819,10 @@ Stay warm, encouraging, and direct. Use LaTeX for math ($...$).`;
     delete cfg.thinkingLevel;
 
     if (!isThinkingDisabled && thinkingLevel) {
-       cfg.thinkingConfig = { thinkingLevel };
+       cfg.thinkingConfig = { 
+         includeThoughts: true,
+         thinkingLevel: thinkingLevel 
+       };
     }
 
     const tools = this.config.enableTools
@@ -852,11 +856,19 @@ Stay warm, encouraging, and direct. Use LaTeX for math ($...$).`;
       /^ça va/i, /^comment vas-tu/i, /^comment ca va/i,
       /^merci/i, /^thanks/i, /^ok/i, /^d'accord/i,
       /^oui/i, /^non/i, /^yes/i, /^no/i,
-      /^\?+$/, /^!+$/
+      /^\?+$/, /^!+$/,
+      /^re/i, /^test/i, /^yo/i, /^wesh/i, /^hey/i
     ];
 
-    if (text.length < 12) return false;
+    // Seuil de longueur plus élevé pour forcer le thinking uniquement sur les vraies questions
+    if (text.length < 25) return false;
     if (simplePatterns.some(p => p.test(text))) return false;
+    
+    // Si le message ne contient pas de verbe d'action ou de point d'interrogation, probablement pas besoin de thinking
+    const hasQuestion = text.includes('?');
+    const hasComplexKeywords = /(pourquoi|comment|explique|aide-moi|exercice|problème|théorème|calcul|analyse)/i.test(text);
+    
+    if (!hasQuestion && !hasComplexKeywords) return false;
     
     return true;
   }

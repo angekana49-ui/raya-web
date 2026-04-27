@@ -8,8 +8,20 @@ import {
   type UserEntitlements,
 } from "@/lib/user-entitlements";
 
+const ENTITLEMENTS_CACHE_KEY = "raya_user_entitlements_v1";
+
+function readEntitlementsCache(): UserEntitlements {
+  if (typeof window === "undefined") return DEFAULT_USER_ENTITLEMENTS;
+  try {
+    const raw = localStorage.getItem(ENTITLEMENTS_CACHE_KEY);
+    return raw ? JSON.parse(raw) : DEFAULT_USER_ENTITLEMENTS;
+  } catch {
+    return DEFAULT_USER_ENTITLEMENTS;
+  }
+}
+
 export function useUserEntitlements(userId?: string) {
-  const [entitlements, setEntitlements] = useState<UserEntitlements>(DEFAULT_USER_ENTITLEMENTS);
+  const [entitlements, setEntitlements] = useState<UserEntitlements>(readEntitlementsCache);
   const [loading, setLoading] = useState(Boolean(userId));
 
   const refresh = useCallback(async () => {
@@ -24,12 +36,17 @@ export function useUserEntitlements(userId?: string) {
     if (error) {
       console.error("Entitlements fetch error:", error.message);
       setLoading(false);
-      return DEFAULT_USER_ENTITLEMENTS;
+      return entitlements || DEFAULT_USER_ENTITLEMENTS;
     }
 
     const next = normalizeUserEntitlements(data);
     setEntitlements(next);
     setLoading(false);
+    try {
+      localStorage.setItem(ENTITLEMENTS_CACHE_KEY, JSON.stringify(next));
+    } catch {
+      // ignore
+    }
     return next;
   }, [userId]);
 

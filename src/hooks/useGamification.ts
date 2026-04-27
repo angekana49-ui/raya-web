@@ -76,7 +76,24 @@ const DEFAULT_BADGES: BadgeItem[] = [
   { id: "xp_10k", label: "10K Club", emoji: "💎", unlocked: false },
 ];
 
+const GAMIFICATION_CACHE_KEY = "raya_gamification_v1";
+
 function buildInitialState(): GamificationState {
+  if (typeof window !== "undefined") {
+    try {
+      const cached = localStorage.getItem(GAMIFICATION_CACHE_KEY);
+      if (cached) {
+        const parsed = JSON.parse(cached);
+        // Ensure missions and badges are valid arrays
+        if (Array.isArray(parsed.todaysMissions) && Array.isArray(parsed.badges)) {
+          return parsed;
+        }
+      }
+    } catch (e) {
+      console.warn("Failed to read gamification cache:", e);
+    }
+  }
+
   return {
     xpToday: 0,
     totalXp: 0,
@@ -155,7 +172,15 @@ export function useGamification(userId?: string) {
       const { data, error } = await supabase.rpc("get_gamification");
       if (error || !data) return;
       dbLoadedRef.current = true;
-      setState((prev) => mergeDbState(data as Record<string, unknown>, prev));
+      setState((prev) => {
+        const next = mergeDbState(data as Record<string, unknown>, prev);
+        try {
+          localStorage.setItem(GAMIFICATION_CACHE_KEY, JSON.stringify(next));
+        } catch (e) {
+          // ignore quota issues
+        }
+        return next;
+      });
     }
     loadFromDb();
   }, [userId]);
@@ -163,6 +188,14 @@ export function useGamification(userId?: string) {
   // 2. Continuous DB Sync (debounced)
   useEffect(() => {
     if (!userId || !dbLoadedRef.current) return;
+    
+    // Always update local cache immediately for reactivity
+    try {
+      localStorage.setItem(GAMIFICATION_CACHE_KEY, JSON.stringify(state));
+    } catch (e) {
+      // ignore quota issues
+    }
+
     if (dbSyncTimerRef.current) clearTimeout(dbSyncTimerRef.current);
     dbSyncTimerRef.current = setTimeout(async () => {
       const { error } = await supabase.rpc("upsert_gamification", { state: toDbPayload(state) });

@@ -3,6 +3,14 @@ import type { SessionSummaryPayload } from '@/lib/session-aggregator'
 
 const GUEST_CONVERSATION_VISIBILITY_DAYS = 30
 
+// Simple request-level cache for user account state to reduce DB roundtrips
+const userAccountStateCache = new Map<string, {
+  hasVerifiedEmail: boolean
+  accountState: 'onboarding_pending' | 'active_unverified' | 'active_verified'
+  timestamp: number
+}>();
+const CACHE_TTL = 1000 * 60 * 5; // 5 minutes
+
 function getGuestVisibilityCutoffIso(): string {
   const cutoff = new Date()
   cutoff.setDate(cutoff.getDate() - GUEST_CONVERSATION_VISIBILITY_DAYS)
@@ -13,6 +21,11 @@ async function getUserAccountState(userId: string): Promise<{
   hasVerifiedEmail: boolean
   accountState: 'onboarding_pending' | 'active_unverified' | 'active_verified'
 }> {
+  const cached = userAccountStateCache.get(userId);
+  if (cached && (Date.now() - cached.timestamp) < CACHE_TTL) {
+    return { hasVerifiedEmail: cached.hasVerifiedEmail, accountState: cached.accountState };
+  }
+
   const { data, error } = await supabaseAdmin
     .from('users')
     .select('account_state')
@@ -29,10 +42,13 @@ async function getUserAccountState(userId: string): Promise<{
     ? data.account_state
     : 'onboarding_pending'
 
-  return {
+  const result = {
     hasVerifiedEmail: accountState === 'active_verified',
     accountState,
-  }
+  };
+
+  userAccountStateCache.set(userId, { ...result, timestamp: Date.now() });
+  return result;
 }
 
 type ConversationAccessRow = {
@@ -87,7 +103,11 @@ export async function assertConversationOwnership(userId: string, conversationId
 }
 
 export async function assertConversationAccessible(userId: string, conversationId: string) {
-  const data = await getConversationAccessRow(conversationId)
+  const [data, userState] = await Promise.all([
+    getConversationAccessRow(conversationId),
+    getUserAccountState(userId)
+  ]);
+
   if (!data) {
     throw new Error('Conversation not found or access denied')
   }
@@ -104,7 +124,7 @@ export async function assertConversationAccessible(userId: string, conversationI
     return data
   }
 
-  const { hasVerifiedEmail } = await getUserAccountState(userId)
+  const { hasVerifiedEmail } = userState;
   if (hasVerifiedEmail) return data
 
   const cutoffIso = getGuestVisibilityCutoffIso()
@@ -124,6 +144,7 @@ export async function getConversations(userId: string) {
     .eq('user_id', userId)
     .or('context_type.is.null,context_type.eq.general')
     .order('updated_at', { ascending: false })
+    .limit(50)
 
   if (!hasVerifiedEmail) {
     query = query.gte('updated_at', getGuestVisibilityCutoffIso())
@@ -224,10 +245,16 @@ export async function getMessages(userId: string, conversationId: string) {
     .from('messages')
     .select('id, sender, sender_user_id, text, timestamp, has_files, model_used, mode_used, tokens_used, parent_id')
     .eq('conversation_id', conversationId)
-    .order('timestamp', { ascending: true })
+    .order('timestamp', { ascending: false })
+    .limit(100)
 
   if (error) throw error
-  return data
+  // Sort back to ascending for the UI
+  return (data || []).sort((a, b) => {
+    const timeA = new Date(a.timestamp).getTime();
+    const timeB = new Date(b.timestamp).getTime();
+    return timeA - timeB;
+  });
 }
 
 export async function saveMessage(

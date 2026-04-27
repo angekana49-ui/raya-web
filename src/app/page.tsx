@@ -82,7 +82,9 @@ import {
   clearActiveConversationCache,
   hydrateCachedMessages,
   readActiveConversationCache,
+  readConversationsListCache,
   writeActiveConversationCache,
+  writeConversationsListCache,
 } from "@/lib/conversation-cache";
 
 type PopupQueueItem = Omit<SmartPopupContent, "open" | "onClose"> & {
@@ -358,26 +360,50 @@ export default function Home() {
   // Load conversations when user logs in (or on first mount if already logged in)
   useEffect(() => {
     if (!user) { setConversations([]); return; }
+    
+    // 1. Try to load from local cache first for immediate UI
+    const cachedList = readConversationsListCache();
+    if (cachedList && cachedList.length > 0) {
+      setConversations(cachedList);
+    }
+
     async function loadConversations() {
       try {
         const headers = await getAuthHeaders();
         if (!hasAuthHeaders(headers)) {
-          setConversations([]);
+          // If we have cached conversations, we might still be authenticating
           return;
         }
-        const res = await fetch("/api/conversations", { headers });
+
+        // Add a controller to cancel if user logs out or component unmounts
+        const controller = new AbortController();
+        const res = await fetch("/api/conversations", { 
+          headers,
+          signal: controller.signal 
+        });
+        
         if (res.status === 401) {
           setConversations([]);
           return;
         }
         const { data } = await res.json();
         if (data) {
-          setConversations(
-            (data as ConversationRecord[]).map(mapConversationRecord)
-          );
+          const mapped = (data as ConversationRecord[]).map(mapConversationRecord);
+          
+          // Optimization: Only update state and cache if data has changed
+          setConversations((prev) => {
+            const hasChanged = JSON.stringify(prev) !== JSON.stringify(mapped);
+            if (hasChanged) {
+              writeConversationsListCache(mapped);
+              return mapped;
+            }
+            return prev;
+          });
         }
-      } catch (err) {
-        console.error("Failed to load conversations:", err);
+      } catch (err: any) {
+        if (err.name !== 'AbortError') {
+          console.error("Failed to load conversations:", err);
+        }
       }
     }
     loadConversations();
@@ -1058,6 +1084,16 @@ export default function Home() {
         return;
       }
 
+      // Check if this conversation's messages are already in cache
+      const cached = readActiveConversationCache();
+      if (cached && cached.conversationId === id && cached.messages.length > 0) {
+        const hydratedMessages = hydrateCachedMessages(cached.messages);
+        setAllMessages(hydratedMessages);
+        setActiveLeafId(cached.activeLeafId);
+        conversationHistoryRef.current = cached.history.slice(-MAX_CONVERSATION_HISTORY);
+        // We still fetch fresh data but the UI is already responsive
+      }
+
       const res = await fetch(`/api/conversations/${id}`, { headers });
       if (res.status === 401) {
         if (!restoreCachedConversation(id)) {
@@ -1068,10 +1104,21 @@ export default function Home() {
       const { data } = await res.json();
       if (data) {
         const messageRecords = data as MessageRecord[];
-        setAllMessages(messageRecords.map(mapMessageRecord));
-        // Find the most recent message to be the active leaf
-        setActiveLeafId(getLatestLeafId(messageRecords));
-        conversationHistoryRef.current = buildConversationHistoryFromRecords(messageRecords).slice(-MAX_CONVERSATION_HISTORY);
+        const mappedMessages = messageRecords.map(mapMessageRecord);
+        const latestLeaf = getLatestLeafId(messageRecords);
+        const history = buildConversationHistoryFromRecords(messageRecords).slice(-MAX_CONVERSATION_HISTORY);
+
+        setAllMessages(mappedMessages);
+        setActiveLeafId(latestLeaf);
+        conversationHistoryRef.current = history;
+
+        // Update cache
+        writeActiveConversationCache({
+          conversationId: id,
+          activeLeafId: latestLeaf,
+          history,
+          messages: mappedMessages,
+        });
       }
     } catch (err) {
       console.error("Failed to load messages:", err);
