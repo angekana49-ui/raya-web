@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
+import Image from "next/image";
 import { motion, AnimatePresence } from "framer-motion";
 import { ChevronRight, Loader2, Globe, ChevronDown, X } from "lucide-react";
 import { NoTranslate } from "@/components/ui/NoTranslate";
@@ -209,7 +210,7 @@ export default function OnboardingModal({
               </div>
 
               <div className={cn("flex items-center gap-3 mb-1", onClose ? "mt-4" : "")}>
-                <img src="/raya-logo.jpeg" alt="RAYA" className="w-8 h-8 rounded-lg object-cover" />
+                <Image src="/raya-logo.jpeg" alt="RAYA" width={32} height={32} className="w-8 h-8 rounded-lg object-cover" />
                 <span className="text-lg font-bold text-white"><NoTranslate>RAYA</NoTranslate></span>
               </div>
               <h3 className="text-base font-bold text-white mt-1">Set up your student profile</h3>

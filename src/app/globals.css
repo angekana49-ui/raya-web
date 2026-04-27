@@ -14,7 +14,7 @@
   --color-primary: var(--primary);
   --color-primary-dark: var(--primary-dark);
   --color-primary-light: var(--primary-light);
-  --font-sans: "Space Grotesk", "Manrope", "Avenir Next", "Segoe UI", sans-serif;
+  --font-sans: var(--font-inter), "Inter", "Space Grotesk", "Manrope", "Avenir Next", "Segoe UI", sans-serif;
   
   /* Zen Animation Tokens */
   --zen-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
@@ -31,7 +31,7 @@ body {
     #fcfdfe; /* Soft indigo-tinted paper tone */
   background-attachment: fixed;
   color: var(--foreground);
-  font-family: "Space Grotesk", "Manrope", "Avenir Next", "Segoe UI", sans-serif;
+  font-family: var(--font-inter), "Inter", "Space Grotesk", "Manrope", "Avenir Next", "Segoe UI", sans-serif;
   min-height: 100dvh;
 }
 
@@ -85,7 +85,7 @@ html[data-reduce-motion="true"] *::after {
 
 /* Chat message font — DM Sans (close to Google Sans used by Gemini) */
 .chat-text {
-  font-family: "DM Sans", "Google Sans", system-ui, sans-serif;
+  font-family: var(--font-dm-sans), "DM Sans", "Google Sans", system-ui, sans-serif;
   letter-spacing: -0.01em;
   line-height: 1.65;
 }

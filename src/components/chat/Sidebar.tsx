@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import Image from "next/image";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   X,
@@ -220,7 +221,7 @@ export default function Sidebar({
       )}
     >
         <div className="flex items-center gap-2 px-4 pt-4 pb-2">
-          <img src="/raya-logo.jpeg" alt="RAYA" className="w-8 h-8 rounded-lg object-cover" />
+          <Image src="/raya-logo.jpeg" alt="RAYA" width={32} height={32} className="rounded-lg object-cover" />
           <span className="flex-1 text-lg font-bold text-primary">
             <NoTranslate>RAYA AI</NoTranslate>
           </span>

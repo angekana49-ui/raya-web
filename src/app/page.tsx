@@ -1,9 +1,33 @@
 "use client";
 
+import dynamic from "next/dynamic";
+import Image from "next/image";
 import { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import { Suspense } from "react";
 import AuthRedirectHandler from "@/components/auth/AuthRedirectHandler";
 import { motion, AnimatePresence } from "framer-motion";
+
+// Modals & Secondary components lazy-loaded
+const PromptsModal = dynamic(() => import("@/components/chat/PromptsModal"), { ssr: false });
+const ProgressSidebar = dynamic(() => import("@/components/chat/ProgressSidebar"), { ssr: false });
+const StudyRoomShell = dynamic(() => import("@/components/rooms/StudyRoomShell"), { ssr: false });
+const StudyRoomSidebar = dynamic(() => import("@/components/rooms/StudyRoomSidebar"), { ssr: false });
+const StudyRoomsLobby = dynamic(() => import("@/components/rooms/StudyRoomsLobby"), { ssr: false });
+const AIOptionsMenu = dynamic(() => import("@/components/menus/AIOptionsMenu"), { ssr: false });
+const FilePickerMenu = dynamic(() => import("@/components/menus/FilePickerMenu"), { ssr: false });
+const ModelPickerMenu = dynamic(() => import("@/components/menus/ModelPickerMenu"), { ssr: false });
+const AuthModal = dynamic(() => import("@/components/modals/AuthModal"), { ssr: false });
+const EarnHeartsModal = dynamic(() => import("@/components/modals/EarnHeartsModal"), { ssr: false });
+const XPOverviewModal = dynamic(() => import("@/components/modals/XPOverviewModal"), { ssr: false });
+const OnboardingModal = dynamic(() => import("@/components/modals/OnboardingModal"), { ssr: false });
+const PromoCodeModal = dynamic(() => import("@/components/modals/PromoCodeModal"), { ssr: false });
+const CreateRoomModal = dynamic(() => import("@/components/modals/CreateRoomModal"), { ssr: false });
+const JoinRoomModal = dynamic(() => import("@/components/modals/JoinRoomModal"), { ssr: false });
+const InviteRoomModal = dynamic(() => import("@/components/modals/InviteRoomModal"), { ssr: false });
+const RayaCardModal = dynamic(() => import("@/components/modals/RayaCardModal").then(m => m.RayaCardModal), { ssr: false });
+const LoginRecoveryModal = dynamic(() => import("@/components/modals/LoginRecoveryModal").then(m => m.LoginRecoveryModal), { ssr: false });
+const SmartPopup = dynamic(() => import("@/components/ui/SmartPopup"), { ssr: false });
+
 import {
   Menu,
   Lightbulb,
@@ -19,27 +43,9 @@ import { Message, AttachedFile, Conversation, StudyRoomPreview } from "@/types";
 
 // Components
 import Sidebar from "@/components/chat/Sidebar";
-import PromptsModal from "@/components/chat/PromptsModal";
-import ProgressSidebar from "@/components/chat/ProgressSidebar";
 import ChatWorkspace from "@/components/chat/ChatWorkspace";
-import StudyRoomShell from "@/components/rooms/StudyRoomShell";
-import StudyRoomSidebar from "@/components/rooms/StudyRoomSidebar";
-import StudyRoomsLobby from "@/components/rooms/StudyRoomsLobby";
-import AIOptionsMenu from "@/components/menus/AIOptionsMenu";
-import FilePickerMenu from "@/components/menus/FilePickerMenu";
-import ModelPickerMenu from "@/components/menus/ModelPickerMenu";
-import AuthModal from "@/components/modals/AuthModal";
-import EarnHeartsModal from "@/components/modals/EarnHeartsModal";
-import XPOverviewModal from "@/components/modals/XPOverviewModal";
-import OnboardingModal from "@/components/modals/OnboardingModal";
-import PromoCodeModal from "@/components/modals/PromoCodeModal";
-import CreateRoomModal from "@/components/modals/CreateRoomModal";
-import JoinRoomModal from "@/components/modals/JoinRoomModal";
-import InviteRoomModal from "@/components/modals/InviteRoomModal";
-import { RayaCardModal } from "@/components/modals/RayaCardModal";
-import { LoginRecoveryModal } from "@/components/modals/LoginRecoveryModal";
 import { NoTranslate } from "@/components/ui/NoTranslate";
-import SmartPopup, { type SmartPopupContent } from "@/components/ui/SmartPopup";
+import { type SmartPopupContent } from "@/components/ui/SmartPopup";
 import { useGamification, getNetMessages } from "@/hooks/useGamification";
 import type { BadgeItem, GamificationState } from "@/hooks/useGamification";
 import { useStudyRooms } from "@/hooks/useStudyRooms";
@@ -1531,7 +1537,7 @@ export default function Home() {
                 </button>
 
                 <div className="flex-1 flex items-center justify-center gap-2">
-                  <img src="/raya-logo.jpeg" alt="RAYA" className="w-9 h-9 rounded-full object-cover" />
+                  <Image src="/raya-logo.jpeg" alt="RAYA" width={36} height={36} className="rounded-full object-cover" />
                   <div className="text-center">
                     <h1 className="text-lg font-bold text-gray-900"><NoTranslate>RAYA</NoTranslate></h1>
                     <p className="text-xs text-gray-500">AI Assistant</p>

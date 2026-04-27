@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Image from "next/image";
 import { motion } from "framer-motion";
 import {
   Sparkles,
@@ -86,7 +87,7 @@ export default function ProgressSidebar({
       )}
     >
       <div className="flex items-center gap-2 px-4 pt-4 pb-2">
-        <img src="/raya-logo.jpeg" alt="RAYA" className="w-8 h-8 rounded-[10px] object-cover shadow-sm" />
+        <Image src="/raya-logo.jpeg" alt="RAYA" width={32} height={32} className="rounded-[10px] object-cover shadow-sm" />
         <div className="flex-1">
           <span className="text-sm font-black text-slate-800 uppercase tracking-wide">
             <NoTranslate>Journey</NoTranslate>

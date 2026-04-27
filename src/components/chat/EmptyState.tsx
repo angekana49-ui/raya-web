@@ -6,6 +6,7 @@ import {
   Sparkles,
   ArrowRight,
 } from "lucide-react";
+import Image from "next/image";
 import { motion, Variants } from "framer-motion";
 import { NoTranslate } from "@/components/ui/NoTranslate";
 
@@ -77,21 +78,17 @@ export default function EmptyState({
             }}
             className="absolute -inset-10 blur-3xl rounded-full"
           />
-          <motion.div
-            whileHover={{ scale: 1.05 }}
-            className="relative"
-          >
-            <img
+          <div className="relative group">
+            <div className="absolute -inset-1 bg-gradient-to-tr from-primary/30 to-violet-500/30 rounded-full blur-xl opacity-0 group-hover:opacity-100 transition-opacity duration-700" />
+            <Image
               src="/raya-logo.jpeg"
               alt="RAYA"
-              className="w-20 h-20 rounded-[24px] object-cover shadow-2xl border-4 border-white relative z-10"
+              width={80}
+              height={80}
+              className="relative rounded-full object-cover border-4 border-white shadow-2xl ring-1 ring-primary/10 group-hover:scale-105 transition-transform duration-500"
+              priority
             />
-            <motion.div
-              animate={{ rotate: 360 }}
-              transition={{ duration: 20, repeat: Infinity, ease: "linear" }}
-              className="absolute -inset-1 rounded-[26px] bg-gradient-to-tr from-indigo-500 via-purple-500 to-pink-500 opacity-30 blur-[2px]"
-            />
-          </motion.div>
+          </div>
         </div>
 
         <motion.h1

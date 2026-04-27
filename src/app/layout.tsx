@@ -1,10 +1,23 @@
 import type { Metadata } from "next";
+import { Inter, DM_Sans } from "next/font/google";
 import Script from "next/script";
 import "./globals.css";
 import "katex/dist/katex.min.css";
 import { GoogleTranslateScript } from "@/components/menus/LanguageMenu";
 import SocialNotificationCenter from "@/components/social/SocialNotificationCenter";
 import UnifiedToastStack from "@/components/notifications/UnifiedToastStack";
+
+const inter = Inter({
+  subsets: ["latin"],
+  display: "swap",
+  variable: "--font-inter",
+});
+
+const dmSans = DM_Sans({
+  subsets: ["latin"],
+  display: "swap",
+  variable: "--font-dm-sans",
+});
 
 const siteUrl = "https://raya.thebluestift.com";
 const normalizedSiteUrl = (process.env.NEXT_PUBLIC_APP_URL ?? siteUrl).replace(/\/$/, "");
@@ -114,10 +127,6 @@ export default function RootLayout({
             </Script>
           </>
         )}
-        <link
-          href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;1,9..40,400&display=swap"
-          rel="stylesheet"
-        />
         <link rel="icon" type="image/png" href="/favicon-96x96.png" sizes="96x96" />
         <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
         <link rel="shortcut icon" href="/favicon.ico" />
@@ -128,7 +137,7 @@ export default function RootLayout({
           dangerouslySetInnerHTML={{ __html: JSON.stringify(organizationSchema) }}
         />
       </head>
-      <body className="antialiased font-sans" suppressHydrationWarning>
+      <body className={`${inter.variable} ${dmSans.variable} antialiased font-sans`} suppressHydrationWarning>
         {children}
         <GoogleTranslateScript />
         <SocialNotificationCenter />
