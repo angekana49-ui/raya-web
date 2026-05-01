@@ -35,9 +35,9 @@ export default function RoomMessageBubble({ event, index }: RoomMessageBubblePro
 
   return (
     <motion.div
-      initial={{ opacity: 0, y: 12 }}
+      initial={{ opacity: 0, y: 8 }}
       animate={{ opacity: 1, y: 0 }}
-      transition={{ delay: index < 4 ? index * 0.04 : 0 }}
+      transition={{ duration: 0.18, delay: index === 0 ? 0.02 : 0 }}
       className={isInlineEvent ? "flex justify-center" : isOwnMessage ? "flex justify-end" : "flex justify-start"}
     >
       {isInlineEvent ? (
@@ -102,20 +102,27 @@ export default function RoomMessageBubble({ event, index }: RoomMessageBubblePro
               ) : "")}
             </p>
             {event.files && event.files.length > 0 && (
-              <div className="mt-3 flex flex-wrap gap-2">
+              <div className="mt-3 grid gap-2 sm:flex sm:flex-wrap">
                 {event.files.map((file, idx) => (
                   <button
                     type="button"
                     key={idx} 
                     onClick={() => openAttachedFile(file)}
-                    className={`rounded-xl border p-2 text-[10px] font-bold ${
+                    className={`rounded-2xl border px-3 py-2 text-left text-[10px] font-bold ${
                       isOwnMessage ? "border-white/20 bg-white/10 text-white" : "border-slate-100 bg-slate-50 text-slate-600"
                     }`}
                     disabled={!resolveAttachedFileUrl(file)}
                   >
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-2.5">
                       <FileText className="h-3.5 w-3.5 shrink-0" />
-                      <span className="max-w-[180px] truncate">{file.name}</span>
+                      <div className="min-w-0">
+                        <div className="max-w-[220px] truncate">{file.name}</div>
+                        <div className={`mt-0.5 text-[9px] font-semibold uppercase tracking-wide ${
+                          isOwnMessage ? "text-white/65" : "text-slate-400"
+                        }`}>
+                          Tap to open
+                        </div>
+                      </div>
                     </div>
                   </button>
                 ))}

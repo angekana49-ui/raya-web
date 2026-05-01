@@ -41,7 +41,7 @@ type UseStudyRoomsResult = {
   openInvitedGuestOnboarding: () => void;
   registerInvitedGuestEngagement: () => void;
   clearInvitedGuestFlow: () => void;
-  handleCreateRoom: (payload: { title: string; mission: string; duration: number; aiMode: "passive" | "active"; files: File[] }) => void;
+  handleCreateRoom: (payload: { title: string; mission: string; duration: number; aiMode: "passive" | "active"; files: File[] }) => Promise<void>;
   handleJoinRoom: (inviteCode: string) => void;
   handleRemoveRoom: (id: string) => void;
   roomError: string | null;
@@ -333,7 +333,9 @@ export function useStudyRooms({
       } catch (logErr) {
         console.error('Failed to create room in DB (unstringifiable):', err, 'log error:', logErr);
       }
-      setRoomError(((err as any)?.message) ? String((err as any).message) : "Could not create study room. Please try again.");
+      const message = ((err as any)?.message) ? String((err as any).message) : "Could not create study room. Please try again.";
+      setRoomError(message);
+      throw new Error(message);
     }
   }, []);
 

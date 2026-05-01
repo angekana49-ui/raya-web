@@ -208,18 +208,11 @@ export function buildRoomReportHtml(input: {
       }
     </style>
     ${input.autoPrint ? `
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
     <script>
       window.addEventListener('load', () => {
-        const element = document.querySelector('.page');
-        const opt = {
-          margin: 10,
-          filename: '${escapeHtml(input.roomName).replace(/[^a-z0-9]/gi, '_')}_Report.pdf',
-          image: { type: 'jpeg', quality: 0.98 },
-          html2canvas: { scale: 2 },
-          jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' }
-        };
-        html2pdf().set(opt).from(element).save();
+        window.setTimeout(() => {
+          window.print();
+        }, 180);
       });
     </script>` : ""}
   </head>

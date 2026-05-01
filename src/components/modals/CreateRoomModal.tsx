@@ -8,7 +8,7 @@ import { cn } from "@/lib/utils";
 interface CreateRoomModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onCreate?: (payload: { title: string; mission: string; duration: number; aiMode: "passive" | "active"; files: File[] }) => void;
+  onCreate?: (payload: { title: string; mission: string; duration: number; aiMode: "passive" | "active"; files: File[] }) => void | Promise<void>;
 }
 
 export default function CreateRoomModal({
@@ -21,6 +21,8 @@ export default function CreateRoomModal({
   const [duration, setDuration] = useState(30);
   const [aiMode, setAiMode] = useState<"passive" | "active">("active");
   const [files, setFiles] = useState<File[]>([]);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [formError, setFormError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -29,6 +31,8 @@ export default function CreateRoomModal({
     setDuration(30);
     setAiMode("active");
     setFiles([]);
+    setIsSubmitting(false);
+    setFormError(null);
   }, [isOpen]);
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -46,17 +50,29 @@ export default function CreateRoomModal({
     setFiles((prev) => prev.filter((_, i) => i !== index));
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!title.trim() || !mission.trim()) return;
-    onCreate?.({ 
-      title: title.trim(), 
-      mission: mission.trim(),
-      duration,
-      aiMode,
-      files
-    });
-    onClose();
+    if (!title.trim() || !mission.trim()) {
+      setFormError("Give the room a clear title and mission before launching.");
+      return;
+    }
+
+    try {
+      setIsSubmitting(true);
+      setFormError(null);
+      await onCreate?.({
+        title: title.trim(),
+        mission: mission.trim(),
+        duration,
+        aiMode,
+        files
+      });
+      onClose();
+    } catch (error) {
+      setFormError(error instanceof Error ? error.message : "Could not launch the room right now.");
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   return (
@@ -76,7 +92,7 @@ export default function CreateRoomModal({
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.96, y: 10 }}
             className="fixed inset-0 z-[70] flex items-center justify-center p-4 overflow-y-auto"
-            onClick={onClose}
+            onClick={isSubmitting ? undefined : onClose}
           >
             <div
               className="my-auto w-full max-w-lg overflow-hidden rounded-[32px] border border-slate-200 bg-white shadow-2xl"
@@ -96,6 +112,7 @@ export default function CreateRoomModal({
                   </div>
                   <button
                     onClick={onClose}
+                    disabled={isSubmitting}
                     className="flex h-10 w-10 items-center justify-center rounded-full bg-white/10 transition-colors hover:bg-white/20"
                   >
                     <X className="h-5 w-5" />
@@ -127,6 +144,9 @@ export default function CreateRoomModal({
                     className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3.5 text-sm font-medium leading-relaxed text-slate-900 outline-none transition-all focus:border-indigo-400 focus:bg-white focus:ring-4 focus:ring-indigo-50"
                     placeholder="e.g. Solve together, explain clearly, and help the slowest teammate catch up before the timer ends."
                   />
+                  <p className="mt-2 text-[11px] font-medium text-slate-400">
+                    Keep it concrete: what should the squad produce before the timer ends?
+                  </p>
                 </div>
 
                 <div className="grid grid-cols-2 gap-4">
@@ -220,19 +240,31 @@ export default function CreateRoomModal({
                   </div>
                 </div>
 
+                {formError && (
+                  <div className="rounded-2xl border border-red-100 bg-red-50 px-4 py-3 text-sm font-semibold text-red-700">
+                    {formError}
+                  </div>
+                )}
+
+                <div className="rounded-2xl border border-indigo-100 bg-indigo-50/70 px-4 py-3 text-[11px] font-semibold leading-relaxed text-indigo-700">
+                  The room starts live immediately. Raya, the timer, and the shared transcript all begin as soon as you launch.
+                </div>
+
                 <div className="flex gap-3 pt-2">
                   <button
                     type="button"
                     onClick={onClose}
+                    disabled={isSubmitting}
                     className="flex-1 rounded-2xl border border-slate-200 bg-white py-4 text-xs font-black uppercase tracking-widest text-slate-500 transition-all hover:bg-slate-50 active:scale-95"
                   >
                     Cancel
                   </button>
                   <button
                     type="submit"
-                    className="flex-3 rounded-2xl bg-gradient-to-r from-indigo-600 to-violet-600 py-4 text-xs font-black uppercase tracking-widest text-white shadow-xl shadow-indigo-200 transition-all hover:shadow-indigo-300 active:scale-[0.98]"
+                    disabled={isSubmitting}
+                    className="flex-3 rounded-2xl bg-gradient-to-r from-indigo-600 to-violet-600 py-4 text-xs font-black uppercase tracking-widest text-white shadow-xl shadow-indigo-200 transition-all hover:shadow-indigo-300 active:scale-[0.98] disabled:cursor-wait disabled:opacity-70"
                   >
-                    Launch Squad
+                    {isSubmitting ? "Launching..." : "Launch Squad"}
                   </button>
                 </div>
               </form>

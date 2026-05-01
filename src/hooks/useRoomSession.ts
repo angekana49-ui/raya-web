@@ -95,6 +95,9 @@ export function useRoomSession({
   const participantLookupRef = useRef<Record<string, string>>({});
   const messageChannelRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
   const presenceChannelRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
+  const membershipSnapshotRef = useRef<Set<string>>(new Set());
+  const participantsHydratedRef = useRef(false);
+  const lastTrackedTypingRef = useRef<boolean | null>(null);
 
   useEffect(() => {
     onInitialMessagesRef.current = onInitialMessages;
@@ -116,34 +119,6 @@ export function useRoomSession({
   useEffect(() => {
     participantLookupRef.current = participantLookup;
   }, [participantLookup]);
-
-  const loadParticipants = useCallback(async () => {
-    if (!enabled || !roomId) {
-      setParticipants([]);
-      return [];
-    }
-
-    const { data, error } = await supabase
-      .from("study_room_participants")
-      .select(`
-        id,
-        user_id,
-        joined_at,
-        users ( display_name, username )
-      `)
-      .eq("room_id", roomId)
-      .order("joined_at", { ascending: true });
-
-    if (error) {
-      console.error("[useRoomSession] Failed to load participants:", error);
-      return [];
-    }
-
-    const nextParticipants = (data ?? []).map(mapParticipant);
-    setParticipants(nextParticipants);
-    participantLookupRef.current = buildParticipantLookup(nextParticipants);
-    return nextParticipants;
-  }, [enabled, roomId]);
 
   const resolveParticipantName = useCallback(async (userId: string | null | undefined) => {
     if (!userId) return null;
@@ -183,6 +158,77 @@ export function useRoomSession({
 
     return resolvedName;
   }, []);
+
+  const emitMembershipDelta = useCallback(async (nextParticipants: RoomParticipant[]) => {
+    if (!participantsHydratedRef.current) {
+      membershipSnapshotRef.current = new Set(nextParticipants.map((participant) => participant.userId));
+      participantsHydratedRef.current = true;
+      return;
+    }
+
+    const previousIds = membershipSnapshotRef.current;
+    const nextIds = new Set(nextParticipants.map((participant) => participant.userId));
+    membershipSnapshotRef.current = nextIds;
+
+    const joinedIds = Array.from(nextIds).filter((userId) => !previousIds.has(userId));
+    const leftIds = Array.from(previousIds).filter((userId) => !nextIds.has(userId));
+
+    for (const joiningUserId of joinedIds) {
+      if (joiningUserId === currentDbUserId) continue;
+      const name =
+        (await resolveParticipantName(joiningUserId)) ||
+        participantLookupRef.current[joiningUserId] ||
+        "A member";
+      onSystemEventRef.current?.(`${name} joined the room.`);
+    }
+
+    for (const leavingUserId of leftIds) {
+      if (leavingUserId === currentDbUserId) continue;
+      const name =
+        participantLookupRef.current[leavingUserId] ||
+        (await resolveParticipantName(leavingUserId)) ||
+        "A member";
+      onSystemEventRef.current?.(`${name} left the room.`);
+    }
+  }, [currentDbUserId, resolveParticipantName]);
+
+  const loadParticipants = useCallback(async (options?: { emitDelta?: boolean }) => {
+    if (!enabled || !roomId) {
+      setParticipants([]);
+      membershipSnapshotRef.current = new Set();
+      participantsHydratedRef.current = false;
+      return [];
+    }
+
+    const { data, error } = await supabase
+      .from("study_room_participants")
+      .select(`
+        id,
+        user_id,
+        joined_at,
+        users ( display_name, username )
+      `)
+      .eq("room_id", roomId)
+      .order("joined_at", { ascending: true });
+
+    if (error) {
+      console.error("[useRoomSession] Failed to load participants:", error);
+      return [];
+    }
+
+    const nextParticipants = (data ?? []).map(mapParticipant);
+    setParticipants(nextParticipants);
+    participantLookupRef.current = buildParticipantLookup(nextParticipants);
+
+    if (options?.emitDelta) {
+      await emitMembershipDelta(nextParticipants);
+    } else {
+      membershipSnapshotRef.current = new Set(nextParticipants.map((participant) => participant.userId));
+      participantsHydratedRef.current = true;
+    }
+
+    return nextParticipants;
+  }, [emitMembershipDelta, enabled, roomId]);
 
   const loadInitialMessages = useCallback(async () => {
     if (!enabled || !conversationId) {
@@ -238,14 +284,19 @@ export function useRoomSession({
     const state = channel.presenceState<Record<string, unknown>>();
     const selfId = currentDbUserId || currentUserId || null;
     const uniqueTyping = new Map<string, string>();
-    let presentCount = 0;
+    const presentIds = new Set<string>();
 
-    Object.values(state).forEach((entries) => {
+    Object.entries(state).forEach(([presenceKey, entries]) => {
       if (!Array.isArray(entries) || entries.length === 0) return;
-      presentCount += 1;
 
       entries.forEach((entry: any) => {
-        const entryUserId = typeof entry?.db_user_id === "string" ? entry.db_user_id : entry?.user_id;
+        const entryUserId =
+          typeof entry?.db_user_id === "string"
+            ? entry.db_user_id
+            : typeof entry?.user_id === "string"
+              ? entry.user_id
+              : presenceKey;
+        presentIds.add(entryUserId);
         if (!entry?.typing || !entryUserId || entryUserId === selfId) return;
         const displayName =
           entry?.display_name ||
@@ -255,7 +306,7 @@ export function useRoomSession({
       });
     });
 
-    setOnlineCount(presentCount);
+    setOnlineCount(presentIds.size);
     setTypingMembers(Array.from(uniqueTyping.values()));
   }, [currentDbUserId, currentUserId, participantLookup]);
 
@@ -263,6 +314,9 @@ export function useRoomSession({
     async (typing: boolean) => {
       const channel = presenceChannelRef.current;
       if (!channel) return;
+      if (lastTrackedTypingRef.current === typing) return;
+
+      lastTrackedTypingRef.current = typing;
 
       await channel.track({
         user_id: currentUserId || null,
@@ -304,7 +358,7 @@ export function useRoomSession({
 
   useEffect(() => {
     if (!enabled || !roomId) return;
-    void loadParticipants();
+    void loadParticipants({ emitDelta: false });
   }, [enabled, roomId, loadParticipants]);
 
   useEffect(() => {
@@ -371,41 +425,15 @@ export function useRoomSession({
           table: "study_room_participants",
           filter: `room_id=eq.${roomId}`,
         },
-        async (payload) => {
-          let systemEventBody: string | null = null;
-
-          if (payload.eventType === "INSERT") {
-            const joiningUserId = (payload.new as any)?.user_id as string | undefined;
-            if (joiningUserId && joiningUserId !== currentDbUserId) {
-              const name =
-                (await resolveParticipantName(joiningUserId)) ||
-                participantLookupRef.current[joiningUserId] ||
-                "A member";
-              systemEventBody = `${name} joined the room.`;
-            }
-          }
-
-          if (payload.eventType === "DELETE") {
-            const leavingUserId = (payload.old as any)?.user_id as string | undefined;
-            if (leavingUserId && leavingUserId !== currentDbUserId) {
-              const name =
-                participantLookupRef.current[leavingUserId] ||
-                (await resolveParticipantName(leavingUserId)) ||
-                "A member";
-              systemEventBody = `${name} left the room.`;
-            }
-          }
-
-          await loadParticipants();
+        async () => {
+          await loadParticipants({ emitDelta: true });
           syncTypingMembers();
-          if (systemEventBody) {
-            onSystemEventRef.current?.(systemEventBody);
-          }
         },
       )
       .subscribe(async (status) => {
         if (status === "SUBSCRIBED") {
           presenceChannelRef.current = presenceChannel;
+          lastTrackedTypingRef.current = null;
           await trackPresence(false);
           syncTypingMembers();
           return;
@@ -430,6 +458,7 @@ export function useRoomSession({
       void supabase.removeChannel(presenceChannel);
       messageChannelRef.current = null;
       presenceChannelRef.current = null;
+      lastTrackedTypingRef.current = null;
     };
   }, [
     conversationId,
@@ -437,7 +466,6 @@ export function useRoomSession({
     currentUserId,
     enabled,
     loadParticipants,
-    resolveParticipantName,
     reloadMissedMessages,
     roomId,
     syncTypingMembers,

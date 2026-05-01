@@ -58,7 +58,7 @@ export default function StudyRoomSidebar({
   maxMembers,
   roomAiMode,
 }: StudyRoomSidebarProps) {
-  const { user } = useAuth();
+  const { user, dbUserId } = useAuth();
   const [friends, setFriends] = useState<socialService.UserProfile[]>([]);
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState<socialService.UserProfile[]>([]);
@@ -75,6 +75,10 @@ export default function StudyRoomSidebar({
       loadFriends();
     }
   }, [visible, user]);
+
+  useEffect(() => {
+    setRoomFiles(initialFiles);
+  }, [initialFiles]);
 
   useEffect(() => {
     if (visible && roomId) {
@@ -113,7 +117,7 @@ export default function StudyRoomSidebar({
     setIsSearching(true);
     const results = await socialService.searchUsers(val);
     // Filter out self and existing friends
-    const filtered = results.filter(r => r.id !== user?.id && !friends.some(f => f.id === r.id));
+    const filtered = results.filter(r => r.id !== dbUserId && !friends.some(f => f.id === r.id));
     setSearchResults(filtered);
     setIsSearching(false);
   };
@@ -185,9 +189,9 @@ export default function StudyRoomSidebar({
   return (
     <aside
       className={cn(
-        "fixed inset-y-2 right-2 z-50 h-[calc(100vh-1rem)] shrink-0 rounded-3xl border border-slate-200/80 bg-[linear-gradient(180deg,#ffffff_0%,#f8fafc_100%)] shadow-[0_18px_60px_rgba(15,23,42,0.08)] backdrop-blur-sm transition-all duration-300 md:relative md:inset-0",
+        "fixed inset-y-2 right-2 z-[70] md:relative md:inset-0 h-[calc(100vh-1rem)] shrink-0 glass-panel rounded-3xl flex flex-col overflow-hidden transition-all duration-300",
         visible
-          ? "w-[280px] translate-x-0 opacity-100 sm:w-[320px]"
+          ? "w-[82vw] max-w-[320px] translate-x-0 opacity-100 md:w-[320px]"
           : "pointer-events-none w-0 translate-x-full opacity-0 md:translate-x-0"
       )}
     >
@@ -207,7 +211,7 @@ export default function StudyRoomSidebar({
         </button>
       </div>
 
-      <div className="flex h-[calc(100%-64px)] flex-col gap-4 overflow-y-auto px-3 pb-4">
+      <div className="flex-1 overflow-y-auto px-3 pb-4">
         {!roomId ? (
           <div className="flex flex-col items-center justify-center h-full px-6 text-center space-y-4">
             <div className="w-16 h-16 rounded-3xl bg-slate-50 flex items-center justify-center text-slate-300 border border-slate-100">
@@ -309,7 +313,7 @@ export default function StudyRoomSidebar({
                 {members.map((member) => {
                   const isFriend = friendshipStatuses[member.id] === 'accepted';
                   const isPending = friendshipStatuses[member.id] === 'pending' || pendingFriendRequests.has(member.id);
-                  const isSelf = member.id === user?.id;
+                  const isSelf = member.id === dbUserId;
 
                   return (
                     <div key={member.id} className="flex items-center gap-3 rounded-[18px] border border-slate-100 bg-slate-50/80 px-3 py-2.5">

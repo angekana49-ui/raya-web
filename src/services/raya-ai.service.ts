@@ -147,7 +147,7 @@ export class RayaAIService {
       reasoningEffort: config.reasoningEffort,
       enableTools: config.enableTools ?? false,
       systemPrompt: config.systemPrompt,
-      systemPromptPath: config.systemPromptPath || path.join(process.cwd(), 'prompts/RAYA_v3.0_SYSTEM_PROMPT.md'),
+      systemPromptPath: config.systemPromptPath || path.join(process.cwd(), 'prompts/RAYA_v3.0_SYSTEM_PROMPT.xml'),
     };
 
     // Initialize appropriate client
@@ -196,7 +196,8 @@ Stay warm, encouraging, and direct. Use LaTeX for math ($...$).`;
       // Replace the placeholder section 14 with the real live context
       const marker = PROMPT_CONTEXT_MARKERS.find((candidate) => prompt.includes(candidate));
       if (marker) {
-        prompt = prompt.slice(0, prompt.indexOf(marker)) + this.config.studentContext;
+        const markerIndex = prompt.indexOf(marker);
+        prompt = prompt.slice(0, markerIndex + marker.length) + '\n' + this.config.studentContext;
       } else {
         prompt += `\n\n[CONTEXT]\n${this.config.studentContext}`;
       }
@@ -481,14 +482,54 @@ Stay warm, encouraging, and direct. Use LaTeX for math ($...$).`;
     });
 
     let fullText = '';
+    const INSIGHT_START = '---RAYA_INSIGHT---';
+    let insightDetected = false;
+    let preInsightBuffer = ''; // Buffer for potential start tag match
 
     // Stream chunks
     for await (const chunk of response) {
       const chunkText = chunk.text || '';
-      if (chunkText) {
-        fullText += chunkText;
-        yield chunkText;
+      if (!chunkText) continue;
+
+      fullText += chunkText;
+
+      if (insightDetected) {
+        // Once insight is detected, we stop yielding anything
+        continue;
       }
+
+      // Check if we are starting to see the insight tag
+      const combined = preInsightBuffer + chunkText;
+      const startIndex = combined.indexOf(INSIGHT_START);
+
+      if (startIndex !== -1) {
+        insightDetected = true;
+        // Yield the part before the insight tag
+        const beforeInsight = combined.slice(0, startIndex);
+        if (beforeInsight) {
+          yield beforeInsight;
+        }
+        preInsightBuffer = ''; // Clear buffer
+      } else {
+        // No full tag yet. We need to be careful not to yield 
+        // a partial tag at the end of the current stream.
+        // The tag is 18 chars long. Keep last 17 chars in buffer.
+        const keepLen = INSIGHT_START.length - 1;
+        if (combined.length > keepLen) {
+          const toYield = combined.slice(0, combined.length - keepLen);
+          preInsightBuffer = combined.slice(combined.length - keepLen);
+          if (toYield) {
+            yield toYield;
+          }
+        } else {
+          preInsightBuffer = combined;
+        }
+      }
+    }
+
+    // If we finished and never saw the insight, yield the remaining buffer
+    if (!insightDetected && preInsightBuffer) {
+      yield preInsightBuffer;
     }
 
     // Add response to history
@@ -545,14 +586,47 @@ Stay warm, encouraging, and direct. Use LaTeX for math ($...$).`;
     });
 
     let fullText = '';
+    const INSIGHT_START = '---RAYA_INSIGHT---';
+    let insightDetected = false;
+    let preInsightBuffer = '';
 
     // Stream chunks
     for await (const chunk of stream) {
       const chunkText = chunk.choices[0]?.delta?.content || '';
-      if (chunkText) {
-        fullText += chunkText;
-        yield chunkText;
+      if (!chunkText) continue;
+
+      fullText += chunkText;
+
+      if (insightDetected) {
+        continue;
       }
+
+      const combined = preInsightBuffer + chunkText;
+      const startIndex = combined.indexOf(INSIGHT_START);
+
+      if (startIndex !== -1) {
+        insightDetected = true;
+        const beforeInsight = combined.slice(0, startIndex);
+        if (beforeInsight) {
+          yield beforeInsight;
+        }
+        preInsightBuffer = '';
+      } else {
+        const keepLen = INSIGHT_START.length - 1;
+        if (combined.length > keepLen) {
+          const toYield = combined.slice(0, combined.length - keepLen);
+          preInsightBuffer = combined.slice(combined.length - keepLen);
+          if (toYield) {
+            yield toYield;
+          }
+        } else {
+          preInsightBuffer = combined;
+        }
+      }
+    }
+
+    if (!insightDetected && preInsightBuffer) {
+      yield preInsightBuffer;
     }
 
     // Add response to history
