@@ -28,7 +28,7 @@ const MAX_HISTORY_MESSAGES = 40;
 const MAX_FILE_PAYLOADS = 3;
 const ROOM_AI_TURN_STALE_MS = 90_000;
 const SOLO_SYSTEM_PROMPT_PATH = path.join(process.cwd(), 'prompts/RAYA_v3.0_SYSTEM_PROMPT.xml');
-const ROOM_SYSTEM_PROMPT_PATH = path.join(process.cwd(), 'prompts/RAYA_ROOMS_PROMPT_DRAFT.md');
+const ROOM_SYSTEM_PROMPT_PATH = path.join(process.cwd(), 'prompts/RAYA_ROOMS_PROMPT.xml');
 const DEFAULT_FALLBACK_BASE_URL = 'https://api.groq.com/openai/v1';
 const DEFAULT_FALLBACK_MODEL = 'mixtral-8x7b-32768';
 
