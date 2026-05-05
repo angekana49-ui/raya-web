@@ -65,6 +65,31 @@ type ConversationAccessRow = {
     | null
 }
 
+async function assertStudyRoomConversationMembership(userId: string, conversation: ConversationAccessRow) {
+  const room = (conversation.study_rooms || [])[0]
+  if (!room) {
+    throw new Error('Conversation not found or access denied')
+  }
+
+  if (room.created_by === userId) {
+    return room
+  }
+
+  const { data, error } = await supabaseAdmin
+    .from('study_room_participants')
+    .select('user_id')
+    .eq('room_id', room.id)
+    .eq('user_id', userId)
+    .maybeSingle()
+
+  if (error) throw error
+  if (!data) {
+    throw new Error('Conversation not found or access denied')
+  }
+
+  return room
+}
+
 async function getConversationAccessRow(conversationId: string): Promise<ConversationAccessRow | null> {
   const { data, error } = await supabaseAdmin
     .from('conversations')
@@ -112,16 +137,15 @@ export async function assertConversationAccessible(userId: string, conversationI
     throw new Error('Conversation not found or access denied')
   }
 
-  const activeStudyRoom = (data.study_rooms || []).find((room) => room.is_active)
   const isOwner = data.user_id === userId
-  const isActiveStudyRoomConversation = data.context_type === 'study_room' && !!activeStudyRoom
 
-  if (!isOwner && !isActiveStudyRoomConversation) {
-    throw new Error('Conversation not found or access denied')
+  if (data.context_type === 'study_room') {
+    await assertStudyRoomConversationMembership(userId, data)
+    return data
   }
 
   if (!isOwner) {
-    return data
+    throw new Error('Conversation not found or access denied')
   }
 
   const { hasVerifiedEmail } = userState;
@@ -184,19 +208,22 @@ export async function updateConversation(
   }
 
   const isOwner = accessRow.user_id === userId
-  const activeStudyRoom = (accessRow.study_rooms || []).find((room) => room.is_active)
-  const isActiveStudyRoomConversation = accessRow.context_type === 'study_room' && !!activeStudyRoom
 
-  if (!isOwner && !isActiveStudyRoomConversation) {
-    throw new Error('Conversation not found or access denied')
-  }
+  if (accessRow.context_type === 'study_room') {
+    const room = await assertStudyRoomConversationMembership(userId, accessRow)
+    if (!room.is_active) {
+      throw new Error('Conversation not found or access denied')
+    }
 
-  // Non-owners in a live study room may refresh preview only (shared transcript / last reply).
-  if (!isOwner) {
-    if (updates.title !== undefined || updates.is_active !== undefined) {
+    // Room members may refresh preview only. Title/status stay host-owned.
+    if (!isOwner && (updates.title !== undefined || updates.is_active !== undefined)) {
       throw new Error('Conversation not found or access denied')
     }
   } else {
+    if (!isOwner) {
+      throw new Error('Conversation not found or access denied')
+    }
+
     const { hasVerifiedEmail } = await getUserAccountState(userId)
     if (!hasVerifiedEmail) {
       const cutoffIso = getGuestVisibilityCutoffIso()
@@ -209,7 +236,7 @@ export async function updateConversation(
 
   // CRITICAL FIX: Prevent mass assignment. Since supabaseAdmin uses the Service Role key, RLS is bypassed.
   // Passing user input directly into .update() allows attackers to overwrite ANY column (e.g., user_id).
-  const safeUpdates: Record<string, any> = {}
+  const safeUpdates: Record<string, string | boolean> = {}
   if (updates.title !== undefined) safeUpdates.title = updates.title
   if (updates.preview !== undefined) safeUpdates.preview = updates.preview
   if (updates.is_active !== undefined) safeUpdates.is_active = updates.is_active

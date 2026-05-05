@@ -83,7 +83,14 @@ async function getDbUserId(): Promise<string | null> {
 
 export async function getActiveRooms(): Promise<StudyRoomPreview[]> {
   try {
-    const response = await fetch('/api/rooms/active');
+    const { data: { session } } = await supabase.auth.getSession();
+    const headers: Record<string, string> = {};
+
+    if (session?.access_token) {
+      headers.Authorization = `Bearer ${session.access_token}`;
+    }
+
+    const response = await fetch('/api/rooms/active', { headers });
     if (!response.ok) {
       const errorText = await response.text().catch(() => '');
       throw new Error(errorText || `Active rooms request failed with ${response.status}`);
@@ -318,47 +325,27 @@ export async function getRoomReport(roomId: string): Promise<StudyRoomReport | n
 }
 
 export async function uploadRoomFiles(roomId: string, files: File[]) {
-  const dbUserId = await getDbUserId();
-  if (!dbUserId) throw new Error('You must be signed in to upload files.');
+  const { data: { session } } = await supabase.auth.getSession();
+  if (!session?.access_token) throw new Error('You must be signed in to upload files.');
 
-  const uploads = files.map(async (file) => {
-    const fileExt = file.name.split('.').pop();
-    const fileName = `${Math.random().toString(36).substring(2)}.${fileExt}`;
-    const filePath = `${roomId}/${fileName}`;
+  const formData = new FormData();
+  files.slice(0, 3).forEach((file) => formData.append('files', file));
 
-    // 1. Upload to Storage
-    const { error: uploadError } = await supabase.storage
-      .from('room-files')
-      .upload(filePath, file);
-
-    if (uploadError) throw uploadError;
-
-    // 2. Get Public URL
-    const { data: { publicUrl } } = supabase.storage
-      .from('room-files')
-      .getPublicUrl(filePath);
-
-    // 3. Save to room_files table
-    const { data, error: dbError } = await supabase
-      .from('room_files')
-      .insert({
-        room_id: roomId,
-        file_name: file.name,
-        file_path: filePath,
-        file_url: publicUrl,
-        file_type: file.type.startsWith('image/') ? 'image' : file.type === 'application/pdf' ? 'pdf' : 'document',
-        mime_type: file.type,
-        file_size: file.size,
-        uploader_id: dbUserId
-      })
-      .select()
-      .single();
-
-    if (dbError) throw dbError;
-    return data;
+  const response = await fetch(`/api/rooms/${roomId}/files`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${session.access_token}`,
+    },
+    body: formData,
   });
 
-  return Promise.all(uploads);
+  if (!response.ok) {
+    const payload = await response.json().catch(() => null);
+    throw new Error(payload?.error || `Room file upload failed with ${response.status}`);
+  }
+
+  const payload = await response.json();
+  return Array.isArray(payload?.data) ? payload.data : [];
 }
 
 export async function getRoomFiles(roomId: string) {
@@ -375,12 +362,20 @@ export async function getRoomFiles(roomId: string) {
     return [];
   }
 
-  return data.map(row => ({
-    id: row.id,
-    name: row.file_name,
-    type: row.file_type as any,
-    url: row.file_url,
-    mimeType: row.mime_type,
-    size: row.file_size
+  const files = await Promise.all(data.map(async (row) => {
+    const { data: signed } = await supabase.storage
+      .from('room-files')
+      .createSignedUrl(row.file_path, 60 * 30);
+
+    return {
+      id: row.id,
+      name: row.file_name,
+      type: row.file_type as any,
+      url: signed?.signedUrl ?? '',
+      mimeType: row.mime_type,
+      size: row.file_size
+    };
   }));
+
+  return files.filter((file) => file.url);
 }

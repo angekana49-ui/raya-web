@@ -26,7 +26,6 @@ const DAILY_XP_CAP = 500;
 const MISSION_MIN_THRESHOLD = 0.35;
 const MAX_HISTORY_MESSAGES = 40;
 const MAX_FILE_PAYLOADS = 3;
-const ROOM_AI_TURN_STALE_MS = 90_000;
 const SOLO_SYSTEM_PROMPT_PATH = path.join(process.cwd(), 'prompts/RAYA_v3.0_SYSTEM_PROMPT.xml');
 const ROOM_SYSTEM_PROMPT_PATH = path.join(process.cwd(), 'prompts/RAYA_ROOMS_PROMPT.xml');
 const DEFAULT_FALLBACK_BASE_URL = 'https://api.groq.com/openai/v1';
@@ -242,52 +241,22 @@ const getRoomRuntimeState = async (conversationId: string) => {
 };
 
 const tryAcquireRoomAiTurn = async (conversationId: string): Promise<RoomTurnAcquireResult> => {
-  // Read-then-update avoids fragile PostgREST `.or()` filter strings on timestamps.
-  const { data: roomRow, error: fetchError } = await supabaseAdmin
-    .from('study_rooms')
-    .select('id, is_active, timer_status, ai_turn_status, ai_turn_started_at')
-    .eq('conversation_id', conversationId)
-    .maybeSingle();
+  const { data, error } = await supabaseAdmin.rpc('acquire_room_ai_turn', {
+    p_conversation_id: conversationId,
+  });
 
-  if (fetchError) throw fetchError;
+  if (error) throw error;
 
-  if (!roomRow || roomRow.is_active === false || roomRow.timer_status === 'finished') {
+  if (data === 'ok') {
+    return { ok: true };
+  }
+
+  if (data === 'closed') {
     return {
       ok: false,
       code: 'ROOM_CLOSED',
       message: 'This room session is closed. The room is now read-only.',
     };
-  }
-
-  const startedMs = roomRow.ai_turn_started_at
-    ? new Date(roomRow.ai_turn_started_at).getTime()
-    : 0;
-  const stale = !roomRow.ai_turn_started_at || startedMs < Date.now() - ROOM_AI_TURN_STALE_MS;
-  const locked = roomRow.ai_turn_status === 'busy' && !stale;
-  if (locked) {
-    return {
-      ok: false,
-      code: 'ROOM_AI_BUSY',
-      message: 'Raya is already responding to the room. Let the current response finish before calling Raya again.',
-    };
-  }
-
-  const { data: updated, error: updateError } = await supabaseAdmin
-    .from('study_rooms')
-    .update({
-      ai_turn_status: 'busy',
-      ai_turn_started_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-    })
-    .eq('id', roomRow.id)
-    .eq('is_active', true)
-    .in('timer_status', ['idle', 'running'])
-    .select('id')
-    .maybeSingle();
-
-  if (updateError) throw updateError;
-  if (updated?.id) {
-    return { ok: true };
   }
 
   return {
@@ -339,7 +308,21 @@ export async function POST(req: NextRequest) {
       ? files.slice(0, MAX_FILE_PAYLOADS)
       : undefined;
     
-    // 0. Restore history from Supabase if client-provided history is empty or short
+    // 0. Authorize the conversation before any service-role reads.
+    const accessPromise = conversationId && userId
+      ? assertConversationAccessible(userId, conversationId)
+      : Promise.resolve(null);
+
+    const entitlementsPromise = userId
+      ? getUserEntitlementsForUser(userId)
+      : Promise.resolve(null);
+
+    const [, entitlements] = await Promise.all([
+      accessPromise,
+      entitlementsPromise,
+    ]);
+
+    // 1. Restore history from Supabase if client-provided history is empty or short
     let safeConversationHistory = Array.isArray(conversationHistory)
       ? conversationHistory.slice(-MAX_HISTORY_MESSAGES)
       : [];
@@ -384,13 +367,6 @@ export async function POST(req: NextRequest) {
       console.log(`[RAYA] Room Request detected. Mode: ${requestedRoomMode}, Mission length: ${roomMission.length}`);
     }
 
-    // Access check + entitlements in parallel (independent round-trips).
-    const [, entitlements] = await Promise.all([
-      conversationId && userId
-        ? assertConversationAccessible(userId, conversationId)
-        : Promise.resolve(null),
-      userId ? getUserEntitlementsForUser(userId) : Promise.resolve(null),
-    ]);
     const effectiveMode = isRoomRequest
       ? requestedRoomMode
       : entitlements
@@ -499,9 +475,6 @@ export async function POST(req: NextRequest) {
           mode_used: effectiveMode || 'normal',
           parent_id: parentId,
           action_type: actionType,
-        }).catch(e => {
-          console.error('[RAYA] Failed to save user message:', e);
-          return null;
         })
       : Promise.resolve(null);
 
@@ -527,12 +500,26 @@ export async function POST(req: NextRequest) {
         const send = (data: object) =>
           controller.enqueue(encoder.encode(`data: ${JSON.stringify(data)}\n\n`));
 
-        // User save + usage + room AI lock in parallel to reduce time-to-first-token.
-        const [userMsgSaved, , turnLock] = await Promise.all([
-          userMsgPromise,
-          usagePromise,
-          roomTurnLockPromise,
-        ]);
+        let userMsgSaved: { id?: string } | null = null;
+        let turnLock: RoomTurnAcquireResult = { ok: true };
+
+        try {
+          // User save + usage + room AI lock in parallel to reduce time-to-first-token.
+          [userMsgSaved, , turnLock] = await Promise.all([
+            userMsgPromise,
+            usagePromise,
+            roomTurnLockPromise,
+          ]);
+        } catch (error: any) {
+          send({
+            type: 'error',
+            error: error?.message || 'Raya could not start this room turn.',
+            code: 'ROOM_TURN_START_FAILED',
+          });
+          controller.close();
+          return;
+        }
+
         const userMsgId = userMsgSaved?.id;
 
         if (isRoomRequest && conversationId) {

@@ -607,13 +607,78 @@ export default function StudyRoomShell({
 
       const decoder = new TextDecoder();
       let assistantText = "";
+      let sseBuffer = "";
+
+      const handleStreamEvent = (data: any) => {
+        if (data.type === "chunk" && data.content) {
+          assistantText += data.content;
+          ensureAssistantPlaceholder();
+          setRoomMessages((prev) =>
+            prev.map((m) => (m.id === assistantId ? { ...m, body: assistantText } : m))
+          );
+          return;
+        }
+
+        if (data.type === "complete" && data.content?.rayaSkipped) {
+          setRoomMessages((prev) => prev.filter((entry) => entry.id !== assistantId));
+          if (pendingTurnRef.current?.clientMessageId === clientMessageId) {
+            pendingTurnRef.current = null;
+          }
+          streamingTurnRef.current = null;
+          const hint =
+            data.content?.rayaSkipReason === "passive_no_trigger"
+              ? "Raya stays quiet in passive mode. Mention @raya or use a quick action (Hint, Summarize...) to bring her in."
+              : "Raya did not reply to this message under the current room rules.";
+          appendSystemRoomEvent("Raya", hint, "Room mode");
+          return;
+        }
+
+        if (data.type === "complete" && data.content?.text) {
+          ensureAssistantPlaceholder();
+          setRoomMessages((prev) =>
+            prev.map((m) => (m.id === assistantId ? { ...m, body: data.content.text } : m))
+          );
+          return;
+        }
+
+        if (data.type === "ids_resolved" && data.content) {
+          const resolvedUserId = data.content.userMessageId as string | undefined;
+          const resolvedAssistantId = data.content.assistantMessageId as string | undefined;
+          const pendingTurn = pendingTurnRef.current;
+
+          if (pendingTurn?.clientMessageId === clientMessageId) {
+            setRoomMessages((prev) =>
+              prev.map((entry) => {
+                if (resolvedUserId && entry.id === pendingTurn.userTempId) {
+                  return { ...entry, id: resolvedUserId };
+                }
+                if (resolvedAssistantId && pendingTurn.assistantTempId && entry.id === pendingTurn.assistantTempId) {
+                  return { ...entry, id: resolvedAssistantId };
+                }
+                return entry;
+              }),
+            );
+            pendingTurnRef.current = null;
+          }
+          streamingTurnRef.current = null;
+          return;
+        }
+
+        if (data.type === "error") {
+          throw new Error(data.error || "Raya stream error");
+        }
+      };
 
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
 
-        const chunk = decoder.decode(value);
-        const lines = chunk.split("\n");
+        sseBuffer += decoder.decode(value, { stream: true });
+        const completeEvents = sseBuffer.split("\n\n");
+        sseBuffer = completeEvents.pop() ?? "";
+        const lines = completeEvents.flatMap((event) =>
+          event.split("\n").filter((line) => line.startsWith("data: ")),
+        );
 
         for (const line of lines) {
           if (line.startsWith("data: ")) {
@@ -664,12 +729,17 @@ export default function StudyRoomShell({
               } else if (data.type === "error") {
                 throw new Error(data.error || "Raya stream error");
               }
-            } catch (e) { 
-                if (e instanceof Error && e.message.includes("Raya stream error")) throw e;
-                /* ignore parse errors */ 
-              }
+            } catch (e) {
+              if (e instanceof Error) throw e;
+              throw new Error("Raya stream parse error");
+            }
           }
         }
+      }
+
+      const tail = sseBuffer.trim();
+      if (tail.startsWith("data: ")) {
+        handleStreamEvent(JSON.parse(tail.slice(6)));
       }
     } catch (err) {
       console.error("Streaming error:", err);
@@ -875,13 +945,14 @@ export default function StudyRoomShell({
   useEffect(() => {
     onMembersSnapshotChange?.(liveMembers);
   }, [liveMembers, onMembersSnapshotChange]);
+  const isFinished = timerStatus === "finished" || (timerStatus === "running" && remainingMs <= 0);
   const timeLeftLabel =
-    timerStatus === "finished"
+    isFinished
       ? "00:00"
       : `${minutes < 10 ? "0" : ""}${minutes}:${seconds < 10 ? "0" : ""}${seconds}`;
   const totalDurationMs = Math.max(durationMinutes * 60 * 1000, 1);
   const elapsedRatio =
-    timerStatus === "finished"
+    isFinished
       ? 1
       : timerStatus === "idle"
         ? 0
@@ -895,8 +966,6 @@ export default function StudyRoomShell({
         : elapsedRatio < 0.8
           ? "Work phase"
           : "Final stretch";
-
-  const isFinished = timerStatus === "finished";
 
   // Report generation
   const [reportLoading, setReportLoading] = useState(false);

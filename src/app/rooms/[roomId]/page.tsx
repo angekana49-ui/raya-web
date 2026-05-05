@@ -11,8 +11,13 @@ type PageProps = {
 async function getRoomInvitePreview(roomId: string) {
   const { data, error } = await supabaseAdmin
     .from("study_rooms")
-    .select("*")
+    .select(`
+      id, title, mission, online_count, max_members, duration, ai_mode, files,
+      conversation_id, timer_started_at, timer_ends_at, timer_status,
+      alert_5m_sent, alert_2m_sent, alert_end_sent, created_at, updated_at
+    `)
     .eq("id", roomId)
+    .eq("is_active", true)
     .maybeSingle();
 
   if (error || !data) {

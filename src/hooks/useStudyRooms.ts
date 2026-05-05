@@ -10,7 +10,7 @@ import {
   getStudyRoomTheme,
   type StudyRoomTheme,
 } from "@/lib/study-room-data";
-import { createStudyRoom, getActiveRooms, getRoomHistory, joinRoom, mapStudyRoomRow, RoomJoinError, uploadRoomFiles } from "@/services/study-rooms.service";
+import { createStudyRoom, getActiveRooms, getRoomFiles, getRoomHistory, getStudyRoom, joinRoom, mapStudyRoomRow, RoomJoinError, uploadRoomFiles } from "@/services/study-rooms.service";
 
 type UseStudyRoomsOptions = {
   authLoading: boolean;
@@ -201,7 +201,20 @@ export function useStudyRooms({
     let cancelled = false;
     joinedRoomRef.current = activeRoomIdState;
 
-    void joinRoom(activeRoomIdState).catch((error) => {
+    void joinRoom(activeRoomIdState).then(async () => {
+      if (cancelled) return;
+      const joinedRoom = await getStudyRoom(activeRoomIdState);
+      if (cancelled || !joinedRoom) return;
+
+      setStudyRooms((prev) => {
+        const index = prev.findIndex((entry) => entry.id === joinedRoom.id);
+        if (index === -1) return [joinedRoom, ...prev];
+
+        const next = [...prev];
+        next[index] = { ...next[index], ...joinedRoom };
+        return next;
+      });
+    }).catch((error) => {
       if (cancelled) return;
       joinedRoomRef.current = null;
 
@@ -291,14 +304,6 @@ export function useStudyRooms({
     aiMode: "passive" | "active"; 
     files: File[] 
   }) => {
-    const attachedFiles = payload.files.map(file => ({
-      id: Math.random().toString(36).substring(7),
-      name: file.name,
-      type: file.type.startsWith("image/") ? "image" : file.type === "application/pdf" ? "pdf" : "document",
-      size: file.size,
-      mimeType: file.type
-    }));
-
     try {
       // 1. Create the room
       const session = await createStudyRoom({
@@ -310,12 +315,15 @@ export function useStudyRooms({
       });
 
       // 2. Upload files if any
+      let uploadedFiles: StudyRoomPreview["files"] = [];
       if (payload.files.length > 0) {
         await uploadRoomFiles(session.id, payload.files);
+        uploadedFiles = await getRoomFiles(session.id);
       }
 
       const createdRoom: StudyRoomPreview = {
         ...mapStudyRoomRow(session),
+        files: uploadedFiles,
         vibe: "Fresh room",
       };
 
