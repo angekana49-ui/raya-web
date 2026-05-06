@@ -31,10 +31,18 @@ Deno.serve(async (req) => {
 
     // 2. Loop through and close them + Generate Report
     for (const room of expiredRooms) {
-      // Deactivate the room
+      // Deactivate the room with full state cleanup to match the system's "finished" state
       const { error: updateError } = await supabase
         .from('study_rooms')
-        .update({ is_active: false, timer_status: 'finished' })
+        .update({ 
+          is_active: false, 
+          timer_status: 'finished',
+          online_count: 0,
+          alert_end_sent: true,
+          ai_turn_status: 'idle',
+          ai_turn_started_at: null,
+          updated_at: new Date().toISOString()
+        })
         .eq('id', room.id);
 
       if (updateError) {

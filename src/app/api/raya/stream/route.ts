@@ -21,6 +21,8 @@ import { buildRoomPrompt, shouldRayaRespondInRoom } from '@/lib/room-ai';
 import fs from 'fs';
 import path from 'path';
 
+export const maxDuration = 60; // Max allowed on some Free Tiers (Hobby is usually 10s-60s max)
+
 const RULE_VERSION = 'v2';
 const DAILY_XP_CAP = 500;
 const MISSION_MIN_THRESHOLD = 0.35;
@@ -499,6 +501,10 @@ export async function POST(req: NextRequest) {
       async start(controller) {
         const send = (data: object) =>
           controller.enqueue(encoder.encode(`data: ${JSON.stringify(data)}\n\n`));
+
+        // ── Keep-alive Ping ──
+        // Extremely important to bypass Vercel serverless TTFB timeouts
+        send({ type: 'ping' });
 
         let userMsgSaved: { id?: string } | null = null;
         let turnLock: RoomTurnAcquireResult = { ok: true };

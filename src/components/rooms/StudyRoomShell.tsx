@@ -492,49 +492,43 @@ export default function StudyRoomShell({
 
     setRoomMessages((prev) => [...prev, userMessage]);
 
-    // Convert files to base64 for transmission
+    // Convert files into persistent Supabase Storage URLs to bypass Vercel 5MB limits
     let filePayloads: Array<{
       name: string;
       type: AttachedFile["type"];
       mimeType?: string;
-      base64: string;
+      url?: string;
     }> = [];
 
     if (roomFiles.length > 0) {
       setIsPreparingAttachments(true);
       try {
-        filePayloads = await Promise.all(
-          roomFiles.map(async (f) => {
-            if (!f.url) return null;
-            try {
-              const res = await fetch(f.url);
-              const blob = await res.blob();
-              return await new Promise<{
-                name: string;
-                type: AttachedFile["type"];
-                mimeType?: string;
-                base64: string;
-              } | null>((resolve) => {
-                const reader = new FileReader();
-                reader.onloadend = () => resolve({
-                  name: f.name,
-                  type: f.type,
-                  mimeType: f.mimeType,
-                  base64: (reader.result as string).split(',')[1]
-                });
-                reader.onerror = () => resolve(null);
-                reader.readAsDataURL(blob);
-              });
-            } catch {
-              return null;
+        const uploadPromises = roomFiles.map(async (f) => {
+          if (!f.url) return null;
+          try {
+            const res = await fetch(f.url);
+            const blob = await res.blob();
+            const safeName = f.name.replace(/[^a-zA-Z0-9.-]/g, "_");
+            const fileName = `rooms/${roomId || 'temp'}/${Date.now()}-${safeName}`;
+            
+            const { data, error } = await supabase.storage.from("room_assets").upload(fileName, blob);
+            if (!error && data) {
+              const { data: publicData } = supabase.storage.from("room_assets").getPublicUrl(fileName);
+              return {
+                name: f.name,
+                type: f.type,
+                mimeType: f.mimeType,
+                url: publicData.publicUrl,
+              };
             }
-          })
-        ).then((res) => res.filter(Boolean) as Array<{
-          name: string;
-          type: AttachedFile["type"];
-          mimeType?: string;
-          base64: string;
-        }>);
+            return null;
+          } catch {
+            return null;
+          }
+        });
+        
+        const results = await Promise.all(uploadPromises);
+        filePayloads = results.filter(Boolean) as typeof filePayloads;
       } finally {
         setIsPreparingAttachments(false);
       }
@@ -548,12 +542,21 @@ export default function StudyRoomShell({
       setIsRayaTyping(true);
       const authHeaders = await getAuthHeaders();
 
+      // Extract fileUrls to append to the message payload ensuring Room events receive file context
+      let finalMessage = trimmed || "Attached files";
+      if (filePayloads.length > 0) {
+        const fileUrls = filePayloads.map(f => f.url).filter(Boolean);
+        if (fileUrls.length > 0) {
+           finalMessage += `\n\n[Attached file URLs: ${fileUrls.join(", ")}]`;
+        }
+      }
+
       const res = await fetch("/api/raya/stream", {
         method: "POST",
         headers: { "Content-Type": "application/json", ...authHeaders },
         body: JSON.stringify({
           clientMessageId,
-          message: trimmed || "Attached files",
+          message: finalMessage,
           aiMode: aiModeInternal,
           model: aiModelInternal,
           roomMission: mission,

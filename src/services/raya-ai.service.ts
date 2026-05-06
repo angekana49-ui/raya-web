@@ -48,6 +48,7 @@ export interface FilePayload {
   type: 'image' | 'pdf' | 'document' | 'spreadsheet' | 'other';
   mimeType?: string;
   base64?: string;
+  url?: string;
 }
 
 type ExchangeType = 'test' | 'exercise' | 'discussion' | 'explanation' | 'social';
@@ -460,11 +461,22 @@ Stay warm, encouraging, and direct. Use LaTeX for math ($...$).`;
 
     // Attach files to the last user message (inlineData)
     if (files && files.length > 0) {
-      const fileParts = files
-        .filter((f) => f.base64 && f.mimeType)
-        .map((f) => ({
-          inlineData: { data: f.base64!, mimeType: f.mimeType! },
-        }));
+      const fileParts = [];
+      for (const f of files) {
+        if (f.base64 && f.mimeType) {
+          fileParts.push({ inlineData: { data: f.base64, mimeType: f.mimeType } });
+        } else if (f.url && f.mimeType) {
+          try {
+            const res = await fetch(f.url);
+            const buf = await res.arrayBuffer();
+            const b64 = Buffer.from(buf).toString('base64');
+            fileParts.push({ inlineData: { data: b64, mimeType: f.mimeType } });
+          } catch (err) {
+            console.error('[RAYA] Failed to fetch remote file for Gemini context:', err);
+          }
+        }
+      }
+      
       if (fileParts.length > 0 && contents.length > 0) {
         const last = contents[contents.length - 1];
         contents = [
@@ -556,12 +568,12 @@ Stay warm, encouraging, and direct. Use LaTeX for math ($...$).`;
     });
 
     // Build last user content — add images if present (OpenAI vision)
-    const imageFiles = files?.filter((f) => f.type === 'image' && f.base64 && f.mimeType) ?? [];
+    const imageFiles = files?.filter((f) => f.type === 'image' && (f.base64 || f.url) && f.mimeType) ?? [];
     const lastUserContent: OpenAI.Chat.ChatCompletionContentPart[] = [
       { type: 'text', text: userMessage },
       ...imageFiles.map((f) => ({
         type: 'image_url' as const,
-        image_url: { url: `data:${f.mimeType};base64,${f.base64}` },
+        image_url: { url: f.url ? f.url : `data:${f.mimeType};base64,${f.base64}` },
       })),
     ];
 

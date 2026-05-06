@@ -745,6 +745,14 @@ export default function Home() {
       setIsTyping(true);
       const messageForAi = aiText ?? userMessage.text;
 
+      let finalMessageForAi = messageForAi;
+      if (userMessage.files && userMessage.files.length > 0) {
+        const fileUrls = userMessage.files.map((f) => f.url).filter(Boolean);
+        if (fileUrls.length > 0) {
+          finalMessageForAi += `\n\n[Attached file URLs: ${fileUrls.join(", ")}]`;
+        }
+      }
+
       try {
         // Create a new conversation if none is active
         let convId = activeConversationId;
@@ -784,7 +792,7 @@ export default function Home() {
         const controller = new AbortController();
         abortControllerRef.current = controller;
 
-        const timeoutId = window.setTimeout(() => {
+          const timeoutId = window.setTimeout(() => {
           if (abortControllerRef.current === controller) {
             controller.abort();
             console.warn("[RAYA] Request timed out after", STREAM_REQUEST_TIMEOUT_MS, "ms");
@@ -797,7 +805,7 @@ export default function Home() {
             method: "POST",
             headers: { "Content-Type": "application/json", ...authHeaders },
             body: JSON.stringify({
-              message: messageForAi,
+              message: finalMessageForAi,
               clientMessageId: userMessage.id,
               conversationId: convId,
               aiMode,
@@ -811,6 +819,7 @@ export default function Home() {
                 type: f.type,
                 mimeType: f.mimeType,
                 base64: f.base64,
+                url: f.url,
               })),
             }),
             signal: controller.signal,
@@ -910,7 +919,7 @@ export default function Home() {
                 const typedInsight = insight && typeof insight === "object" ? insight as Partial<RayaInsight> : null;
                 getSessionAggregator().addExchange(
                   exchangeResult.analyticsPoint,
-                  messageForAi,
+                  finalMessageForAi,
                   typedInsight?.concept_id,
                   typedInsight?.student_verdict === "correct"
                 );
@@ -1031,7 +1040,7 @@ export default function Home() {
     }
   }, []);
 
-  const handleSend = () => {
+  const handleSend = async () => {
     if (isTyping) return;
     if (authLoading || !user || !isProfileComplete) {
       setOnboardingVisible(true);
@@ -1040,14 +1049,39 @@ export default function Home() {
     if (input.trim() === "" && attachedFiles.length === 0) return;
     if (messageLimitActive && netMessages <= 0) { setEarnHeartsVisible(true); return; }
 
+    setIsTyping(true); // Lock early so double-taps are prevented during upload
     const msgText = input.trim() || "(file sent)";
     const parentId = activeLeafId || undefined;
+
+    // Convert local base64 files into persistent Supabase Storage URLs to bypass Vercel 5MB limits
+    const processedFiles = [...attachedFiles];
+    if (processedFiles.length > 0) {
+      try {
+        await Promise.all(processedFiles.map(async (f) => {
+          if (f.base64 && !f.url?.startsWith('http')) {
+            const res = await fetch(`data:${f.mimeType};base64,${f.base64}`);
+            const blob = await res.blob();
+            const safeName = f.name.replace(/[^a-zA-Z0-9.-]/g, "_");
+            const fileName = `${user.id}/${Date.now()}-${safeName}`;
+            
+            const { data, error } = await supabase.storage.from('room_assets').upload(fileName, blob);
+            if (!error && data) {
+              const { data: publicData } = supabase.storage.from('room_assets').getPublicUrl(fileName);
+              f.url = publicData.publicUrl;
+              f.base64 = undefined; // Drop base64 from memory to ensure it isn't sent in the JSON payload
+            }
+          }
+        }));
+      } catch (err) {
+        console.error("[RAYA] Pre-upload failed:", err);
+      }
+    }
 
     const userMessage: Message = {
       id: Date.now().toString(),
       sender: "user",
       text: msgText,
-      files: attachedFiles.length > 0 ? [...attachedFiles] : undefined,
+      files: processedFiles.length > 0 ? processedFiles : undefined,
       timestamp: new Date(),
       parentId,
     };
