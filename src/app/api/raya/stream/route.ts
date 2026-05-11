@@ -32,6 +32,18 @@ const SOLO_SYSTEM_PROMPT_PATH = path.join(process.cwd(), 'prompts/RAYA_v3.0_SYST
 const ROOM_SYSTEM_PROMPT_PATH = path.join(process.cwd(), 'prompts/RAYA_ROOMS_PROMPT.xml');
 const DEFAULT_FALLBACK_BASE_URL = 'https://api.groq.com/openai/v1';
 const DEFAULT_FALLBACK_MODEL = 'mixtral-8x7b-32768';
+const MIN_PROMPT_LENGTH = 200;
+const FALLBACK_SOLO_PROMPT = `You are RAYA, a brilliant female AI academic coach.
+Your goal is to help students learn by themselves using the Socratic method.
+Never solve problems directly. Guide them, probe understanding, and teach missing gaps.
+Stay warm, direct, and use LaTeX for math ($...$).
+Never expose internal insight blocks such as ---RAYA_INSIGHT---.`;
+const FALLBACK_ROOM_PROMPT = `You are RAYA in a shared study room.
+Prioritize the room mission and keep interventions short and useful for the whole group.
+In ACTIVE mode, guide proactively without monopolizing.
+In PASSIVE mode, answer only when clearly invoked or when the room needs recentering.
+Use LaTeX for math ($...$).
+Never expose internal insight blocks such as ---RAYA_INSIGHT---.`;
 
 type RoomTurnAcquireResult =
   | { ok: true }
@@ -70,6 +82,29 @@ const sanitizeStudentContext = (raw?: string): string | undefined => {
 
 const hasMissionGradeTag = (text: string): boolean =>
   /\[MISSION_GRADE:(10|20)\]/i.test(text);
+
+/**
+ * Defense-in-depth for UI: never leak internal insight JSON blocks to users.
+ * RayaAIService already strips them, but this catches malformed/variant outputs.
+ */
+const stripInsightForClient = (text: string): string => {
+  if (!text) return '';
+  return text
+    .replace(/---RAYA_INSIGHT---[\s\S]*?---END_INSIGHT---/gi, '')
+    .replace(/<raya_insight>[\s\S]*?<\/raya_insight>/gi, '')
+    .replace(/^\s*```json\s*\{[\s\S]*?"exchange_type"[\s\S]*?```\s*$/gim, '')
+    .trim();
+};
+
+const toPublicInsight = (insight: unknown): { exchange_type: string; student_verdict: string; difficulty: string } | null => {
+  if (!insight || typeof insight !== 'object') return null;
+  const src = insight as Record<string, unknown>;
+  const exchange_type = typeof src.exchange_type === 'string' ? src.exchange_type : '';
+  const student_verdict = typeof src.student_verdict === 'string' ? src.student_verdict : '';
+  const difficulty = typeof src.difficulty === 'string' ? src.difficulty : '';
+  if (!exchange_type || !student_verdict || !difficulty) return null;
+  return { exchange_type, student_verdict, difficulty };
+};
 
 const buildModeInstruction = (modeId?: string): string => {
   switch (modeId) {
@@ -144,10 +179,13 @@ const getTodaysXpAwarded = async (userId: string): Promise<number> => {
 };
 
 const getPromptTemplate = (promptPath: string, envKey?: string): string => {
-  const envPrompt = envKey ? process.env[envKey] : undefined;
+  const legacyEnvKey = envKey === 'RAYA_ROOMS_SYSTEM_PROMPT'
+    ? 'RAYA_ROOMS_PROMPT'
+    : envKey;
+  const envPrompt = envKey ? (process.env[envKey] || process.env[legacyEnvKey]) : undefined;
   // Validate: skip if it looks like unresolved shell syntax (e.g. "$(cat ...)")
   // or is too short to be a real prompt
-  if (envPrompt && envPrompt.length > 200 && !envPrompt.includes('$(') && !envPrompt.includes('`cat ')) {
+  if (envPrompt && envPrompt.length > MIN_PROMPT_LENGTH && !envPrompt.includes('$(') && !envPrompt.includes('`cat ')) {
     return envPrompt;
   }
   if (envPrompt) {
@@ -159,9 +197,23 @@ const getPromptTemplate = (promptPath: string, envKey?: string): string => {
     return cached;
   }
 
-  const prompt = fs.readFileSync(promptPath, 'utf-8');
-  promptTemplateCache.set(promptPath, prompt);
-  return prompt;
+  try {
+    const prompt = fs.readFileSync(promptPath, 'utf-8');
+    promptTemplateCache.set(promptPath, prompt);
+    return prompt;
+  } catch (error: any) {
+    // Robust in serverless: prompts can be absent if accidentally gitignored/not bundled.
+    const mdFallbackPath = promptPath.endsWith('.xml') ? promptPath.replace(/\.xml$/i, '.md') : promptPath;
+    try {
+      const prompt = fs.readFileSync(mdFallbackPath, 'utf-8');
+      promptTemplateCache.set(promptPath, prompt);
+      return prompt;
+    } catch {
+      const inlineFallback = envKey === 'RAYA_ROOMS_SYSTEM_PROMPT' ? FALLBACK_ROOM_PROMPT : FALLBACK_SOLO_PROMPT;
+      console.error(`[RAYA] Prompt file missing (${promptPath}) and MD fallback missing (${mdFallbackPath}). Using inline fallback.`);
+      return inlineFallback;
+    }
+  }
 };
 
 const buildGeminiInstance = (
@@ -598,11 +650,14 @@ export async function POST(req: NextRequest) {
               if (finalResponse) {
                 fullText = finalResponse.text || fullText;
                 finalInsight = finalResponse.insight ?? null;
+                const safeText = stripInsightForClient(finalResponse.text || '');
+                const insightPublic = toPublicInsight(finalResponse.insight);
                 send({
                   type: 'complete',
                   content: {
-                    text: finalResponse.text,
+                    text: safeText,
                     insight: finalResponse.insight,
+                    insightPublic,
                     progression: finalResponse.progression,
                     conversationHistory: raya.getHistory(),
                     sessionId: sessionId || `session_${Date.now()}`,
@@ -613,7 +668,10 @@ export async function POST(req: NextRequest) {
               break;
             }
             fullText += value;
-            send({ type: 'chunk', content: value });
+            const safeChunk = stripInsightForClient(value || '');
+            if (safeChunk) {
+              send({ type: 'chunk', content: safeChunk });
+            }
           }
 
           return { fullText, modelUsed, insight: finalInsight };

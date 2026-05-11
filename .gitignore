@@ -41,7 +41,10 @@ yarn-error.log*
 next-env.d.ts
 
 # RAYA Internal
-/prompts/
+# Keep prompts versioned so serverless deployments can load them.
+!/prompts/
+!/prompts/*.xml
+!/prompts/*.md
 /docs/
 /supabase/.temp/
 /.vscode/

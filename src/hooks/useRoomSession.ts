@@ -159,6 +159,16 @@ export function useRoomSession({
     return resolvedName;
   }, []);
 
+  const getAuthHeaders = useCallback(async (): Promise<Record<string, string>> => {
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session?.access_token) return {};
+      return { Authorization: `Bearer ${session.access_token}` };
+    } catch {
+      return {};
+    }
+  }, []);
+
   const emitMembershipDelta = useCallback(async (nextParticipants: RoomParticipant[]) => {
     if (!participantsHydratedRef.current) {
       membershipSnapshotRef.current = new Set(nextParticipants.map((participant) => participant.userId));
@@ -211,12 +221,29 @@ export function useRoomSession({
       .eq("room_id", roomId)
       .order("joined_at", { ascending: true });
 
+    let nextParticipants: RoomParticipant[] = [];
     if (error) {
       console.error("[useRoomSession] Failed to load participants:", error);
-      return [];
+      // Fallback via server route (service role + access checks) when direct RLS query fails.
+      try {
+        const headers = await getAuthHeaders();
+        const res = await fetch(`/api/rooms/${roomId}/participants`, { headers });
+        if (!res.ok) throw new Error(`participants fallback failed (${res.status})`);
+        const payload = await res.json();
+        nextParticipants = ((payload?.data || []) as any[]).map((row) => ({
+          id: row.id,
+          userId: row.id,
+          joinedAt: row.joinedAt || new Date().toISOString(),
+          displayName: row.displayName ?? row.username ?? undefined,
+        }));
+      } catch (fallbackError) {
+        console.error("[useRoomSession] Participants fallback failed:", fallbackError);
+        return [];
+      }
+    } else {
+      nextParticipants = (data ?? []).map(mapParticipant);
     }
 
-    const nextParticipants = (data ?? []).map(mapParticipant);
     setParticipants(nextParticipants);
     participantLookupRef.current = buildParticipantLookup(nextParticipants);
 
@@ -228,7 +255,7 @@ export function useRoomSession({
     }
 
     return nextParticipants;
-  }, [emitMembershipDelta, enabled, roomId]);
+  }, [emitMembershipDelta, enabled, getAuthHeaders, roomId]);
 
   const loadInitialMessages = useCallback(async () => {
     if (!enabled || !conversationId) {
@@ -257,12 +284,19 @@ export function useRoomSession({
       ? await query.gt("timestamp", lastMessageTimestampRef.current)
       : await query;
 
+    let missedMessages: RoomMessage[] = [];
     if (error) {
       console.error("[useRoomSession] Failed to reload room messages:", error);
-      return;
+      // Fallback through RPC-backed route to avoid direct table policy/join failures.
+      const rows = await getRoomMessages(conversationId);
+      const allMessages = rows.map(mapRoomMessage);
+      missedMessages = lastMessageTimestampRef.current
+        ? allMessages.filter((message) => message.timestamp > (lastMessageTimestampRef.current as string))
+        : allMessages;
+    } else {
+      missedMessages = (data ?? []).map(mapRoomMessage);
     }
 
-    const missedMessages = (data ?? []).map(mapRoomMessage);
     if (missedMessages.length === 0) return;
 
     for (const message of missedMessages) {
