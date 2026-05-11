@@ -1,1 +1,10 @@
-{}
+{
+	"functions": {
+		"api/**": {
+			"includeFiles": ["prompts/**"]
+		},
+		"src/app/api/**": {
+			"includeFiles": ["prompts/**"]
+		}
+	}
+}

@@ -15,6 +15,51 @@ import OpenAI from 'openai';
 import * as fs from 'fs';
 import * as path from 'path';
 
+// Helper: resolve an env prompt value which may be either inline text or a path
+function tryLoadPromptValue(raw: string | undefined): string | null {
+  if (!raw) return null;
+  const candidate = raw.trim();
+
+  // If looks like an explicit file URI, strip scheme
+  const fileLike = candidate.startsWith('file:') ? candidate.slice(5) : candidate;
+
+  // Heuristics: long values or containing newlines are treated as inline prompt text
+  if (candidate.includes('\n') || candidate.length > 200) {
+    return candidate;
+  }
+
+  // If value looks like a path or filename, try to resolve and read it
+  const looksLikePath = /\\|\//.test(fileLike) || /\.xml$|\.md$|\.txt$/i.test(fileLike);
+  if (looksLikePath) {
+    let resolved = fileLike;
+    if (!path.isAbsolute(resolved)) {
+      // Try several likely locations (project root, project root/prompts, and relative to this module)
+      const attempts = [
+        path.join(process.cwd(), resolved),
+        path.join(process.cwd(), 'prompts', resolved),
+        path.join(__dirname, '..', '..', 'prompts', resolved),
+        path.join(__dirname, '..', 'prompts', resolved),
+      ];
+      for (const a of attempts) {
+        if (fs.existsSync(a)) {
+          resolved = a;
+          break;
+        }
+      }
+    }
+    if (fs.existsSync(resolved)) {
+      try {
+        return fs.readFileSync(resolved, 'utf-8');
+      } catch (e) {
+        console.warn('Failed reading prompt file at', resolved, e);
+        return null;
+      }
+    }
+  }
+
+  // Not a readable file and not a long inline prompt -> treat as inline anyway
+  return candidate;
+}
 // ============================================================================
 // TYPES & INTERFACES
 // ============================================================================
@@ -174,11 +219,19 @@ export class RayaAIService {
     let prompt: string;
 
     // 1. Explicit prompt passed by caller (highest priority)
-    if (this.config.systemPrompt && !this.config.systemPrompt.includes('$(') && this.config.systemPrompt.length > 200) {
-      prompt = this.config.systemPrompt;
-    } else if (process.env.RAYA_SYSTEM_PROMPT && process.env.RAYA_SYSTEM_PROMPT.length > 200 && !process.env.RAYA_SYSTEM_PROMPT.includes('$(')) {
-      // 2. Try Environment Variable (Production/Secure fallback)
-      prompt = process.env.RAYA_SYSTEM_PROMPT;
+    // Priority order:
+    // 1) explicit config.systemPrompt passed by caller
+    // 2) process.env.RAYA_SYSTEM_PROMPT (may be inline text or a path)
+    // 3) systemPromptPath file on disk
+    const fromConfig = this.config.systemPrompt && !this.config.systemPrompt.includes('$(')
+      ? tryLoadPromptValue(this.config.systemPrompt)
+      : null;
+    const fromEnv = tryLoadPromptValue(process.env.RAYA_SYSTEM_PROMPT ?? undefined);
+
+    if (fromConfig) {
+      prompt = fromConfig;
+    } else if (fromEnv) {
+      prompt = fromEnv;
     } else {
       // 3. Try Local File (Development/Configurable default)
       try {
@@ -223,8 +276,13 @@ Stay warm, encouraging, and direct. Use LaTeX for math ($...$).`;
     const cachedPrompt = _staticPromptText.get(promptCacheKey);
     if (cachedPrompt) return cachedPrompt;
     let raw: string;
-    if (this.config.systemPrompt) {
-      raw = this.config.systemPrompt;
+    // loadStaticPrompt should prefer explicit inline prompt, then env/file
+    const fromConfig = this.config.systemPrompt ? tryLoadPromptValue(this.config.systemPrompt) : null;
+    const fromEnv = tryLoadPromptValue(process.env.RAYA_SYSTEM_PROMPT ?? undefined);
+    if (fromConfig) {
+      raw = fromConfig;
+    } else if (fromEnv) {
+      raw = fromEnv;
     } else {
       try {
         raw = fs.readFileSync(this.config.systemPromptPath, 'utf-8');

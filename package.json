@@ -5,6 +5,7 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
+    "postbuild": "node scripts/copy-prompts.js",
     "start": "next start",
     "lint": "eslint",
     "test:raya": "ts-node src/examples/raya-usage-example.ts"
