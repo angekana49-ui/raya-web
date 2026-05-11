@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { Inter, DM_Sans } from "next/font/google";
+// Avoid fetching Google Fonts at build time in environments without network access.
 import Script from "next/script";
 import "./globals.css";
 import "katex/dist/katex.min.css";
@@ -7,17 +7,7 @@ import { GoogleTranslateScript } from "@/components/menus/LanguageMenu";
 import SocialNotificationCenter from "@/components/social/SocialNotificationCenter";
 import UnifiedToastStack from "@/components/notifications/UnifiedToastStack";
 
-const inter = Inter({
-  subsets: ["latin"],
-  display: "swap",
-  variable: "--font-inter",
-});
-
-const dmSans = DM_Sans({
-  subsets: ["latin"],
-  display: "swap",
-  variable: "--font-dm-sans",
-});
+// Using system/local fonts to prevent remote fetch during build.
 
 const siteUrl = "https://raya.thebluestift.com";
 const normalizedSiteUrl = (process.env.NEXT_PUBLIC_APP_URL ?? siteUrl).replace(/\/$/, "");
@@ -137,7 +127,7 @@ export default function RootLayout({
           dangerouslySetInnerHTML={{ __html: JSON.stringify(organizationSchema) }}
         />
       </head>
-      <body className={`${inter.variable} ${dmSans.variable} antialiased font-sans`} suppressHydrationWarning>
+      <body className={`antialiased font-sans`} suppressHydrationWarning>
         {children}
         <GoogleTranslateScript />
         <SocialNotificationCenter />

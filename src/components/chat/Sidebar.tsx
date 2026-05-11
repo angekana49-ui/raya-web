@@ -148,6 +148,13 @@ export default function Sidebar({
     }
   }, []);
 
+  function markLevelUpSeen() {
+    setShowLevelUpHint(false);
+    if (typeof window !== "undefined") {
+      window.localStorage.setItem("raya_level_up_seen_v1", "true");
+    }
+  }
+
   useEffect(() => {
     const syncSettings = () => {
       const seen = window.localStorage.getItem("raya_level_up_seen_v1");
@@ -166,12 +173,6 @@ export default function Sidebar({
     setPromoModalOpen(true);
   }, [openLevelUpCodeRequest]);
 
-  const markLevelUpSeen = () => {
-    setShowLevelUpHint(false);
-    if (typeof window !== "undefined") {
-      window.localStorage.setItem("raya_level_up_seen_v1", "true");
-    }
-  };
 
   if (!mounted) {
     return (

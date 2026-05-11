@@ -10,6 +10,14 @@ export default function SocialNotificationCenter() {
   const { user } = useAuth();
   const addNotification = useNotificationStore(s => s.addNotification);
 
+  function playNotificationSound() {
+    try {
+      const audio = new Audio("/sounds/pop.mp3");
+      audio.volume = 0.4;
+      audio.play().catch(() => {});
+    } catch {}
+  }
+
   useEffect(() => {
     if (!user) return;
 
@@ -76,13 +84,7 @@ export default function SocialNotificationCenter() {
     };
   }, [user, addNotification]);
 
-  const playNotificationSound = () => {
-    try {
-      const audio = new Audio("/sounds/pop.mp3");
-      audio.volume = 0.4;
-      audio.play().catch(() => {});
-    } catch {}
-  };
+  
 
   return null; // Logic only
 }

@@ -70,6 +70,23 @@ export default function StudyRoomSidebar({
   const [socialNotice, setSocialNotice] = useState<string | null>(null);
   const [roomFiles, setRoomFiles] = useState<AttachedFile[]>(initialFiles);
 
+  async function loadFriends() {
+    const data = await socialService.getFriends();
+    setFriends(data);
+  }
+
+
+  async function loadFriendshipStatuses() {
+    const statuses = await socialService.getFriendshipStatuses(members.map(m => m.id));
+    setFriendshipStatuses(statuses);
+  }
+
+  async function loadRoomFiles() {
+    if (!roomId) return;
+    const dbFiles = await getRoomFiles(roomId);
+    setRoomFiles(dbFiles);
+  }
+
   useEffect(() => {
     if (visible && user) {
       loadFriends();
@@ -86,11 +103,11 @@ export default function StudyRoomSidebar({
     }
   }, [visible, roomId]);
 
-  const loadRoomFiles = async () => {
+  async function loadRoomFiles() {
     if (!roomId) return;
     const dbFiles = await getRoomFiles(roomId);
     setRoomFiles(dbFiles);
-  };
+  }
 
   useEffect(() => {
     if (visible && user && members.length > 0) {
@@ -98,15 +115,7 @@ export default function StudyRoomSidebar({
     }
   }, [visible, user, members]);
 
-  const loadFriendshipStatuses = async () => {
-    const statuses = await socialService.getFriendshipStatuses(members.map(m => m.id));
-    setFriendshipStatuses(statuses);
-  };
-
-  const loadFriends = async () => {
-    const data = await socialService.getFriends();
-    setFriends(data);
-  };
+  
 
   const handleSearch = async (val: string) => {
     setSearchQuery(val);
