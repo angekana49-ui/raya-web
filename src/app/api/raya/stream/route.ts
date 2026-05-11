@@ -179,10 +179,13 @@ const getTodaysXpAwarded = async (userId: string): Promise<number> => {
 };
 
 const getPromptTemplate = (promptPath: string, envKey?: string): string => {
-  const legacyEnvKey = envKey === 'RAYA_ROOMS_SYSTEM_PROMPT'
-    ? 'RAYA_ROOMS_PROMPT'
-    : envKey;
-  const envPrompt = envKey ? (process.env[envKey] || process.env[legacyEnvKey]) : undefined;
+  let envPrompt: string | undefined;
+  if (envKey) {
+    const legacyEnvKey = envKey === 'RAYA_ROOMS_SYSTEM_PROMPT' ? 'RAYA_ROOMS_PROMPT' : envKey;
+    envPrompt = process.env[envKey] || process.env[legacyEnvKey];
+  } else {
+    envPrompt = undefined;
+  }
   // Validate: skip if it looks like unresolved shell syntax (e.g. "$(cat ...)")
   // or is too short to be a real prompt
   if (envPrompt && envPrompt.length > MIN_PROMPT_LENGTH && !envPrompt.includes('$(') && !envPrompt.includes('`cat ')) {
