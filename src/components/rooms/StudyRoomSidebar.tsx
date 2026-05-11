@@ -103,12 +103,6 @@ export default function StudyRoomSidebar({
     }
   }, [visible, roomId]);
 
-  async function loadRoomFiles() {
-    if (!roomId) return;
-    const dbFiles = await getRoomFiles(roomId);
-    setRoomFiles(dbFiles);
-  }
-
   useEffect(() => {
     if (visible && user && members.length > 0) {
       loadFriendshipStatuses();
