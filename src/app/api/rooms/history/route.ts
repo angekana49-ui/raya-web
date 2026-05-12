@@ -49,6 +49,26 @@ function mapHistoryRoom(row: HistoryRoomRow) {
   };
 }
 
+async function getParticipantCountByRoom(roomIds: string[]) {
+  if (roomIds.length === 0) return new Map<string, number>();
+
+  const { data, error } = await supabaseAdmin
+    .from("study_room_participants")
+    .select("room_id")
+    .in("room_id", roomIds);
+
+  if (error) {
+    throw error;
+  }
+
+  const counts = new Map<string, number>();
+  for (const row of data || []) {
+    counts.set(row.room_id, (counts.get(row.room_id) ?? 0) + 1);
+  }
+
+  return counts;
+}
+
 export async function GET(req: NextRequest) {
   const userId = await resolveUserId(req);
   if (!userId) {
@@ -105,6 +125,14 @@ export async function GET(req: NextRequest) {
   const merged = new Map<string, ReturnType<typeof mapHistoryRoom>>();
   for (const row of [...(createdRoomsRes.data || []), ...(participantRoomsRes.data || [])] as HistoryRoomRow[]) {
     merged.set(row.id, mapHistoryRoom(row));
+  }
+
+  const memberCounts = await getParticipantCountByRoom([...merged.keys()]);
+  for (const [roomId, room] of merged) {
+    room.online_count = Math.min(
+      Math.max(room.online_count ?? 0, memberCounts.get(roomId) ?? 0),
+      room.max_members ?? 8,
+    );
   }
 
   const data = [...merged.values()].sort((left, right) => {

@@ -130,6 +130,23 @@ export async function getRoomHistory(): Promise<StudyRoomPreview[]> {
   }
 }
 
+export async function getRoomInvitePreview(id: string): Promise<StudyRoomPreview | null> {
+  if (!isValidUuid(id)) return null;
+
+  try {
+    const response = await fetch(`/api/rooms/invite/${encodeURIComponent(id)}`);
+    if (!response.ok) {
+      return null;
+    }
+
+    const payload = await response.json();
+    return payload?.data ? mapStudyRoomRow(payload.data as StudyRoomRow) : null;
+  } catch (error) {
+    console.error('Error fetching room invite preview:', error);
+    return null;
+  }
+}
+
 export async function getStudyRoom(id: string): Promise<StudyRoomPreview | null> {
   const { data, error } = await supabase
     .from('study_rooms')

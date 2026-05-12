@@ -4,13 +4,13 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { StudyRoomPreview } from "@/types";
 import { supabase } from "@/lib/supabase/client";
 import {
-  buildInvitedRoomPreview,
+  extractStudyRoomId,
   findStudyRoomByInviteCode,
   getSelectedRoom,
   getStudyRoomTheme,
   type StudyRoomTheme,
 } from "@/lib/study-room-data";
-import { createStudyRoom, getActiveRooms, getRoomFiles, getRoomHistory, getStudyRoom, joinRoom, mapStudyRoomRow, RoomJoinError, uploadRoomFiles } from "@/services/study-rooms.service";
+import { createStudyRoom, getActiveRooms, getRoomFiles, getRoomHistory, getRoomInvitePreview, getStudyRoom, joinRoom, mapStudyRoomRow, RoomJoinError, uploadRoomFiles } from "@/services/study-rooms.service";
 
 type UseStudyRoomsOptions = {
   authLoading: boolean;
@@ -42,7 +42,7 @@ type UseStudyRoomsResult = {
   registerInvitedGuestEngagement: () => void;
   clearInvitedGuestFlow: () => void;
   handleCreateRoom: (payload: { title: string; mission: string; duration: number; aiMode: "passive" | "active"; files: File[] }) => Promise<void>;
-  handleJoinRoom: (inviteCode: string) => void;
+  handleJoinRoom: (inviteCode: string) => Promise<boolean>;
   handleRemoveRoom: (id: string) => void;
   roomError: string | null;
   clearRoomError: () => void;
@@ -67,6 +67,7 @@ export function useStudyRooms({
   const [removedRoomIds, setRemovedRoomIds] = useState<string[]>([]);
   const [roomError, setRoomError] = useState<string | null>(null);
   const joinedRoomRef = useRef<string | null>(null);
+  const loadedRoomsForUserRef = useRef<string | null>(null);
 
   useEffect(() => {
     const saved = localStorage.getItem("removed_study_rooms");
@@ -105,6 +106,22 @@ export function useStudyRooms({
 
   // Load rooms from Supabase
   useEffect(() => {
+    if (authLoading) return;
+
+    if (!isSignedIn || !userId) {
+      loadedRoomsForUserRef.current = null;
+      setStudyRooms([]);
+      setActiveRoomIdState(null);
+      joinedRoomRef.current = null;
+      return;
+    }
+
+    if (loadedRoomsForUserRef.current === userId) return;
+    loadedRoomsForUserRef.current = userId;
+    setStudyRooms([]);
+    setActiveRoomIdState(null);
+    joinedRoomRef.current = null;
+
     async function loadRooms() {
       const [activeRooms, historyRooms] = await Promise.all([
         getActiveRooms(),
@@ -125,8 +142,8 @@ export function useStudyRooms({
         }),
       );
     }
-    loadRooms();
-  }, []);
+    void loadRooms();
+  }, [authLoading, isSignedIn, userId]);
 
   useEffect(() => {
     const channel = supabase
@@ -150,12 +167,7 @@ export function useStudyRooms({
           setStudyRooms((prev) => {
             const index = prev.findIndex((room) => room.id === mapped.id);
             if (index === -1) {
-              // If it's inactive from the start, we might not want to add it to 'live' list 
-              // unless it's the one we are currently looking at
-              if (row.is_active === false && mapped.timerStatus !== "finished" && mapped.id !== activeRoomIdState) {
-                return prev;
-              }
-              return [mapped, ...prev];
+              return prev;
             }
             
             const next = [...prev];
@@ -174,7 +186,7 @@ export function useStudyRooms({
     return () => {
       void supabase.removeChannel(channel);
     };
-  }, []);
+  }, [activeRoomIdState]);
 
   const setActiveView = useCallback((view: ActiveView) => {
     setActiveViewState(view);
@@ -249,18 +261,37 @@ export function useStudyRooms({
 
     if (!roomInvite) return;
 
-    const joinedRoom =
-      findStudyRoomByInviteCode(studyRooms, roomInvite) ?? buildInvitedRoomPreview(roomInvite);
+    const inviteCode = roomInvite;
+    let cancelled = false;
 
-    setStudyRooms((prev) => {
-      if (prev.some((room) => room.id === joinedRoom.id)) return prev;
-      return [joinedRoom, ...prev];
-    });
-    setActiveViewState("rooms");
-    setActiveRoomIdState(joinedRoom.id);
-    setInvitedGuestFlow(true);
-    setInvitedGuestAlias("Guest learner");
-    setRoomOnboardingNudgeVisible(!authLoading && (!isSignedIn || !isProfileComplete));
+    async function openInvitedRoom() {
+      const roomId = extractStudyRoomId(inviteCode);
+      const joinedRoom =
+        findStudyRoomByInviteCode(studyRooms, roomId) ?? await getRoomInvitePreview(roomId);
+
+      if (cancelled) return;
+
+      if (!joinedRoom) {
+        setRoomError("This room invitation is invalid, expired, or full.");
+        return;
+      }
+
+      setStudyRooms((prev) => {
+        if (prev.some((room) => room.id === joinedRoom.id)) return prev;
+        return [joinedRoom, ...prev];
+      });
+      setActiveViewState("rooms");
+      setActiveRoomIdState(joinedRoom.id);
+      setInvitedGuestFlow(true);
+      setInvitedGuestAlias("Guest learner");
+      setRoomOnboardingNudgeVisible(!authLoading && (!isSignedIn || !isProfileComplete));
+    }
+
+    void openInvitedRoom();
+
+    return () => {
+      cancelled = true;
+    };
   }, [authLoading, isProfileComplete, isSignedIn, studyRooms]);
 
   useEffect(() => {
@@ -347,9 +378,15 @@ export function useStudyRooms({
     }
   }, []);
 
-  const handleJoinRoom = useCallback((inviteCode: string) => {
+  const handleJoinRoom = useCallback(async (inviteCode: string) => {
+    const roomId = extractStudyRoomId(inviteCode);
     const joinedRoom =
-      findStudyRoomByInviteCode(studyRooms, inviteCode) ?? buildInvitedRoomPreview(inviteCode);
+      findStudyRoomByInviteCode(studyRooms, roomId) ?? await getRoomInvitePreview(roomId);
+
+    if (!joinedRoom) {
+      setRoomError("This room invitation is invalid, expired, or full.");
+      return false;
+    }
 
     setStudyRooms((prev) => {
       if (prev.some((room) => room.id === joinedRoom.id)) return prev;
@@ -364,6 +401,7 @@ export function useStudyRooms({
       setInvitedGuestAlias("Guest learner");
       setRoomOnboardingNudgeVisible(false);
     }
+    return true;
   }, [authLoading, isProfileComplete, isSignedIn, studyRooms]);
 
   return {

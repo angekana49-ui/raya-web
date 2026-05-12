@@ -2,6 +2,40 @@ import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase/server";
 import { resolveUserId } from "@/lib/auth";
 
+type ActiveRoomRow = {
+  id: string;
+  online_count: number | null;
+  max_members: number | null;
+  [key: string]: unknown;
+};
+
+async function withParticipantCounts(rows: ActiveRoomRow[]) {
+  if (rows.length === 0) return rows;
+
+  const roomIds = rows.map((row) => row.id);
+  const { data, error } = await supabaseAdmin
+    .from("study_room_participants")
+    .select("room_id")
+    .in("room_id", roomIds);
+
+  if (error) {
+    throw error;
+  }
+
+  const counts = new Map<string, number>();
+  for (const row of data || []) {
+    counts.set(row.room_id, (counts.get(row.room_id) ?? 0) + 1);
+  }
+
+  return rows.map((row) => ({
+    ...row,
+    online_count: Math.min(
+      Math.max(row.online_count ?? 0, counts.get(row.id) ?? 0),
+      row.max_members ?? 8,
+    ),
+  }));
+}
+
 export async function GET(req: NextRequest) {
   try {
     const userId = await resolveUserId(req);
@@ -41,7 +75,7 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: error.message }, { status: 500 });
     }
 
-    return NextResponse.json({ data: data ?? [] });
+    return NextResponse.json({ data: await withParticipantCounts((data ?? []) as ActiveRoomRow[]) });
   } catch (error: any) {
     return NextResponse.json(
       { error: error?.message || "Failed to load active rooms" },

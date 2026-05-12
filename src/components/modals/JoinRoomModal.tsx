@@ -7,7 +7,7 @@ import { Link2, ShieldCheck, Users, X } from "lucide-react";
 interface JoinRoomModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onJoin?: (inviteCode: string) => void;
+  onJoin?: (inviteCode: string) => Promise<boolean | void> | boolean | void;
 }
 
 export default function JoinRoomModal({
@@ -16,17 +16,27 @@ export default function JoinRoomModal({
   onJoin,
 }: JoinRoomModalProps) {
   const [inviteCode, setInviteCode] = useState("");
+  const [isJoining, setIsJoining] = useState(false);
 
   useEffect(() => {
     if (!isOpen) return;
     setInviteCode("");
+    setIsJoining(false);
   }, [isOpen]);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!inviteCode.trim()) return;
-    onJoin?.(inviteCode.trim());
-    onClose();
+    if (!inviteCode.trim() || isJoining) return;
+
+    setIsJoining(true);
+    try {
+      const joined = await onJoin?.(inviteCode.trim());
+      if (joined !== false) {
+        onClose();
+      }
+    } finally {
+      setIsJoining(false);
+    }
   };
 
   return (
@@ -108,9 +118,10 @@ export default function JoinRoomModal({
                   </button>
                   <button
                     type="submit"
+                    disabled={isJoining}
                     className="flex-1 rounded-2xl bg-slate-900 px-4 py-3 text-sm font-black text-white transition-colors hover:bg-slate-800"
                   >
-                    Join room
+                    {isJoining ? "Checking..." : "Join room"}
                   </button>
                 </div>
               </form>

@@ -14,7 +14,11 @@ export async function GET(
     const messages = await getMessages(userId, id)
     return NextResponse.json({ data: messages })
   } catch (error: any) {
-    return NextResponse.json({ error: error.message }, { status: 500 })
+    const message = error?.message || 'Failed to load conversation'
+    const status = message.toLowerCase().includes('access denied') || message.toLowerCase().includes('not found')
+      ? 404
+      : 500
+    return NextResponse.json({ error: message }, { status })
   }
 }
 
@@ -31,7 +35,11 @@ export async function PATCH(
     const conversation = await updateConversation(userId, id, updates)
     return NextResponse.json({ data: conversation })
   } catch (error: any) {
-    return NextResponse.json({ error: error.message }, { status: 500 })
+    const message = error?.message || 'Failed to update conversation'
+    const status = message.toLowerCase().includes('access denied') || message.toLowerCase().includes('not found')
+      ? 404
+      : 500
+    return NextResponse.json({ error: message }, { status })
   }
 }
 
@@ -47,6 +55,10 @@ export async function DELETE(
     await deleteConversation(userId, id)
     return NextResponse.json({ success: true })
   } catch (error: any) {
-    return NextResponse.json({ error: error.message }, { status: 500 })
+    const message = error?.message || 'Failed to delete conversation'
+    const status = message.toLowerCase().includes('access denied') || message.toLowerCase().includes('not found')
+      ? 404
+      : 500
+    return NextResponse.json({ error: message }, { status })
   }
 }

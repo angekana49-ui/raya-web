@@ -276,15 +276,3 @@ export function findStudyRoomByInviteCode(
       room.title.toLowerCase().replace(/[^a-z0-9]+/g, "-") === normalizedCode,
   );
 }
-
-export function buildInvitedRoomPreview(inviteCode: string): StudyRoomPreview {
-  const normalizedCode = normalizeInviteCode(inviteCode);
-  return {
-    id: normalizedCode,
-    title: inviteCode.trim(),
-    mission: "Invited room preview. Join the squad, catch up fast, and help shape the discussion.",
-    onlineCount: 1,
-    maxMembers: 8,
-    vibe: "Invite room",
-  };
-}

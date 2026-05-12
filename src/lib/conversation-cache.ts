@@ -24,13 +24,21 @@ function isBrowser() {
   return typeof window !== "undefined";
 }
 
+function scopedKey(baseKey: string, ownerKey?: string | null) {
+  if (!ownerKey) return null;
+  return `${baseKey}:${ownerKey}`;
+}
+
 export function writeActiveConversationCache(payload: {
+  ownerKey?: string | null;
   conversationId: string | null;
   activeLeafId: string | null;
   history: Array<{ role: "user" | "assistant"; content: string }>;
   messages: Message[];
 }) {
   if (!isBrowser()) return;
+  const cacheKey = scopedKey(ACTIVE_CONVERSATION_CACHE_KEY, payload.ownerKey);
+  if (!cacheKey) return;
 
   const serializable: ActiveConversationCache = {
     conversationId: payload.conversationId,
@@ -48,17 +56,19 @@ export function writeActiveConversationCache(payload: {
   };
 
   try {
-    window.localStorage.setItem(ACTIVE_CONVERSATION_CACHE_KEY, JSON.stringify(serializable));
+    window.localStorage.setItem(cacheKey, JSON.stringify(serializable));
   } catch {
     // ignore storage errors
   }
 }
 
-export function readActiveConversationCache(): ActiveConversationCache | null {
+export function readActiveConversationCache(ownerKey?: string | null): ActiveConversationCache | null {
   if (!isBrowser()) return null;
+  const cacheKey = scopedKey(ACTIVE_CONVERSATION_CACHE_KEY, ownerKey);
+  if (!cacheKey) return null;
 
   try {
-    const raw = window.localStorage.getItem(ACTIVE_CONVERSATION_CACHE_KEY);
+    const raw = window.localStorage.getItem(cacheKey);
     if (!raw) return null;
     return JSON.parse(raw) as ActiveConversationCache;
   } catch {
@@ -66,32 +76,40 @@ export function readActiveConversationCache(): ActiveConversationCache | null {
   }
 }
 
-export function clearActiveConversationCache() {
+export function clearActiveConversationCache(ownerKey?: string | null) {
   if (!isBrowser()) return;
+  const cacheKey = scopedKey(ACTIVE_CONVERSATION_CACHE_KEY, ownerKey);
   try {
+    if (cacheKey) {
+      window.localStorage.removeItem(cacheKey);
+    }
     window.localStorage.removeItem(ACTIVE_CONVERSATION_CACHE_KEY);
   } catch {
     // ignore storage errors
   }
 }
 
-export function writeConversationsListCache(conversations: any[]) {
+export function writeConversationsListCache(conversations: any[], ownerKey?: string | null) {
   if (!isBrowser()) return;
+  const cacheKey = scopedKey(CONVERSATIONS_LIST_CACHE_KEY, ownerKey);
+  if (!cacheKey) return;
   try {
     const serializable = conversations.map(c => ({
       ...c,
       date: c.date instanceof Date ? c.date.toISOString() : c.date
     }));
-    window.localStorage.setItem(CONVERSATIONS_LIST_CACHE_KEY, JSON.stringify(serializable));
+    window.localStorage.setItem(cacheKey, JSON.stringify(serializable));
   } catch {
     // ignore
   }
 }
 
-export function readConversationsListCache(): any[] | null {
+export function readConversationsListCache(ownerKey?: string | null): any[] | null {
   if (!isBrowser()) return null;
+  const cacheKey = scopedKey(CONVERSATIONS_LIST_CACHE_KEY, ownerKey);
+  if (!cacheKey) return null;
   try {
-    const raw = window.localStorage.getItem(CONVERSATIONS_LIST_CACHE_KEY);
+    const raw = window.localStorage.getItem(cacheKey);
     if (!raw) return null;
     const parsed = JSON.parse(raw);
     return parsed.map((c: any) => ({

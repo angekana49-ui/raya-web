@@ -12,7 +12,7 @@ import RoomAIOptionsMenu from "@/components/menus/RoomAIOptionsMenu";
 import ModelPickerMenu from "@/components/menus/ModelPickerMenu";
 import { Loader2 } from "lucide-react";
 import { supabase } from "@/lib/supabase/client";
-import { advanceStudyRoomTimer, syncRoomOnlineCount } from "@/services/study-rooms.service";
+import { advanceStudyRoomTimer, getRoomParticipant } from "@/services/study-rooms.service";
 import { DEFAULT_USER_ENTITLEMENTS } from "@/lib/user-entitlements";
 import { useRoomSession, type RoomMessage } from "@/hooks/useRoomSession";
 import { roomMessageToEvent } from "@/lib/roomMessageAdapter";
@@ -138,8 +138,6 @@ export default function StudyRoomShell({
   const [aiModelInternal, setAiModelInternal] = useState("gemini-3.1-flash-lite-preview");
   const [changesRemaining, setChangesRemaining] = useState(isCreator ? 5 : 1);
   const [liveOnlineCount, setLiveOnlineCount] = useState(onlineCount);
-  const lastSyncedOnlineCountRef = useRef<number | null>(null);
-  const syncOnlineCountTimeoutRef = useRef<number | null>(null);
   const streamingTurnRef = useRef<string | null>(null);
 
   useEffect(() => {
@@ -147,11 +145,27 @@ export default function StudyRoomShell({
   }, [roomAiMode]);
 
   useEffect(() => {
-    setLiveOnlineCount(onlineCount);
-  }, [onlineCount]);
+    let alive = true;
+    if (!roomId || !currentDbUserId) {
+      setChangesRemaining(isCreator ? 5 : 1);
+      return;
+    }
+
+    getRoomParticipant(roomId).then((participant) => {
+      if (!alive || !participant) return;
+      const remaining = Number(participant.mode_changes_left);
+      if (Number.isFinite(remaining)) {
+        setChangesRemaining(Math.max(0, remaining));
+      }
+    });
+
+    return () => {
+      alive = false;
+    };
+  }, [currentDbUserId, isCreator, roomId]);
 
   useEffect(() => {
-    lastSyncedOnlineCountRef.current = onlineCount;
+    setLiveOnlineCount(onlineCount);
   }, [onlineCount]);
 
   const [aiMenuVisible, setAiMenuVisible] = useState(false);
@@ -264,35 +278,6 @@ export default function StudyRoomShell({
   useEffect(() => {
     setLiveOnlineCount(effectivePresenceCount);
   }, [effectivePresenceCount]);
-
-  useEffect(() => {
-    if (!roomId) return;
-    if (sessionOnlineCount == null) return;
-    if (timerStatus === "finished") return;
-    if (lastSyncedOnlineCountRef.current === effectivePresenceCount) return;
-
-    if (syncOnlineCountTimeoutRef.current) {
-      window.clearTimeout(syncOnlineCountTimeoutRef.current);
-      syncOnlineCountTimeoutRef.current = null;
-    }
-
-    syncOnlineCountTimeoutRef.current = window.setTimeout(() => {
-      void syncRoomOnlineCount(roomId, effectivePresenceCount).then((synced) => {
-        if (typeof synced === "number") {
-          lastSyncedOnlineCountRef.current = synced;
-          setLiveOnlineCount(Math.min(synced, maxMembers));
-        }
-      });
-      syncOnlineCountTimeoutRef.current = null;
-    }, 800);
-
-    return () => {
-      if (syncOnlineCountTimeoutRef.current) {
-        window.clearTimeout(syncOnlineCountTimeoutRef.current);
-        syncOnlineCountTimeoutRef.current = null;
-      }
-    };
-  }, [effectivePresenceCount, maxMembers, roomId, sessionOnlineCount, timerStatus]);
 
   useEffect(() => {
     if (timerStatus === "finished") {
@@ -416,14 +401,6 @@ export default function StudyRoomShell({
     if (!autoScrollRef.current) return;
     el.scrollTo({ top: el.scrollHeight, behavior: isRayaTyping ? "auto" : "smooth" });
   }, [isRayaTyping, roomMessages]);
-
-  useEffect(() => {
-    return () => {
-      if (syncOnlineCountTimeoutRef.current) {
-        window.clearTimeout(syncOnlineCountTimeoutRef.current);
-      }
-    };
-  }, []);
 
   useEffect(() => {
     if (!attachmentNotice) return;
@@ -858,25 +835,48 @@ export default function StudyRoomShell({
     }
   };
 
-  const handleModeChange = (newMode: "passive" | "active") => {
+  const handleModeChange = async (newMode: "passive" | "active") => {
     if (newMode === aiModeInternal) return;
     if (changesRemaining <= 0) {
       alert("No more AI mode changes left for this session!");
       return;
     }
 
-    setAiModeInternal(newMode);
-    setChangesRemaining((prev) => prev - 1);
+    try {
+      if (!roomId) throw new Error("Room id missing.");
+      const authHeaders = await getAuthHeaders();
+      const res = await fetch(`/api/rooms/${roomId}/mode`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json", ...authHeaders },
+        body: JSON.stringify({ aiMode: newMode }),
+      });
 
-    // Notify room (simulated)
-    const systemMsg: RoomEvent = {
-      id: `sys-${Date.now()}`,
-      type: "system",
-      title: "Settings Updated",
-      body: `AI behavior switched to ${newMode.toUpperCase()} mode.`,
-      meta: "System",
-    };
-    setRoomMessages(prev => [...prev, systemMsg]);
+      const payload = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(payload?.error || "Could not update AI mode.");
+      }
+
+      const updatedMode = payload?.data?.aiMode === "passive" ? "passive" : "active";
+      const remaining = Number(payload?.data?.changesRemaining);
+      setAiModeInternal(updatedMode);
+      if (Number.isFinite(remaining)) {
+        setChangesRemaining(Math.max(0, remaining));
+      }
+
+      const systemMsg: RoomEvent = {
+        id: `sys-${Date.now()}`,
+        type: "system",
+        title: "Settings Updated",
+        body: `AI behavior switched to ${updatedMode.toUpperCase()} mode.`,
+        meta: "System",
+      };
+      setRoomMessages(prev => [...prev, systemMsg]);
+    } catch (error: any) {
+      appendSystemRoomEvent(
+        "Settings Not Updated",
+        error?.message || "Raya could not update the shared AI mode.",
+      );
+    }
   };
 
   const handleModelChange = (newModel: string) => {

@@ -98,6 +98,7 @@ export function useRoomSession({
   const membershipSnapshotRef = useRef<Set<string>>(new Set());
   const participantsHydratedRef = useRef(false);
   const lastTrackedTypingRef = useRef<boolean | null>(null);
+  const lastParticipantKeyRef = useRef<string>("");
 
   useEffect(() => {
     onInitialMessagesRef.current = onInitialMessages;
@@ -210,40 +211,50 @@ export function useRoomSession({
       return [];
     }
 
-    const { data, error } = await supabase
-      .from("study_room_participants")
-      .select(`
-        id,
-        user_id,
-        joined_at,
-        users ( display_name, username )
-      `)
-      .eq("room_id", roomId)
-      .order("joined_at", { ascending: true });
-
     let nextParticipants: RoomParticipant[] = [];
-    if (error) {
-      console.error("[useRoomSession] Failed to load participants:", error);
-      // Fallback via server route (service role + access checks) when direct RLS query fails.
-      try {
-        const headers = await getAuthHeaders();
-        const res = await fetch(`/api/rooms/${roomId}/participants`, { headers });
-        if (!res.ok) throw new Error(`participants fallback failed (${res.status})`);
-        const payload = await res.json();
-        nextParticipants = ((payload?.data || []) as any[]).map((row) => ({
-          id: row.id,
-          userId: row.id,
-          joinedAt: row.joinedAt || new Date().toISOString(),
-          displayName: row.displayName ?? row.username ?? undefined,
-        }));
-      } catch (fallbackError) {
-        console.error("[useRoomSession] Participants fallback failed:", fallbackError);
+
+    try {
+      const headers = await getAuthHeaders();
+      const res = await fetch(`/api/rooms/${roomId}/participants`, { headers });
+      if (!res.ok) throw new Error(`participants request failed (${res.status})`);
+      const payload = await res.json();
+      nextParticipants = ((payload?.data || []) as any[]).map((row) => ({
+        id: row.id,
+        userId: row.id,
+        joinedAt: row.joinedAt || new Date().toISOString(),
+        displayName: row.displayName ?? row.username ?? undefined,
+      }));
+    } catch (routeError) {
+      console.error("[useRoomSession] Participants route failed:", routeError);
+
+      const { data, error } = await supabase
+        .from("study_room_participants")
+        .select(`
+          id,
+          user_id,
+          joined_at,
+          users ( display_name, username )
+        `)
+        .eq("room_id", roomId)
+        .order("joined_at", { ascending: true });
+
+      if (error) {
+        console.error("[useRoomSession] Failed to load participants:", error);
         return [];
       }
-    } else {
+
       nextParticipants = (data ?? []).map(mapParticipant);
     }
 
+    const participantKey = nextParticipants
+      .map((participant) => `${participant.userId}:${participant.displayName ?? ""}:${participant.joinedAt}`)
+      .join("|");
+
+    if (participantKey === lastParticipantKeyRef.current) {
+      return nextParticipants;
+    }
+
+    lastParticipantKeyRef.current = participantKey;
     setParticipants(nextParticipants);
     participantLookupRef.current = buildParticipantLookup(nextParticipants);
 
@@ -394,6 +405,17 @@ export function useRoomSession({
     if (!enabled || !roomId) return;
     void loadParticipants({ emitDelta: false });
   }, [enabled, roomId, loadParticipants]);
+
+  useEffect(() => {
+    if (!enabled || !conversationId || !roomId) return;
+
+    const interval = window.setInterval(() => {
+      void reloadMissedMessages();
+      void loadParticipants({ emitDelta: true });
+    }, 2500);
+
+    return () => window.clearInterval(interval);
+  }, [conversationId, enabled, loadParticipants, reloadMissedMessages, roomId]);
 
   useEffect(() => {
     if (!enabled || !conversationId || !roomId) {

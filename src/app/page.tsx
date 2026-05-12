@@ -205,6 +205,7 @@ export default function Home() {
 
   // Auth + profile
   const { user, dbUserId, loading: authLoading, signOut } = useAuth();
+  const cacheOwnerKey = user?.id ?? null;
   const { profile, updateProfile, isProfileComplete } = useUserProfile(user?.id);
   const { entitlements, setEntitlements, refresh: refreshEntitlements } = useUserEntitlements(user?.id);
   const {
@@ -288,6 +289,7 @@ export default function Home() {
   const sessionTurnCount = useRef(0);
   const pendingAnalysis = useRef<MessageAnalysis | null>(null);
   const sessionAggregatorRef = useRef<SessionAggregator | null>(null);
+  const previousCacheOwnerKeyRef = useRef<string | null>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
   // Conversation history for multi-turn memory (reset on new/switched conversation)
   const conversationHistoryRef = useRef<unknown[]>([]);
@@ -311,7 +313,7 @@ export default function Home() {
   }, []);
 
   const restoreCachedConversation = useCallback((requestedConversationId?: string | null) => {
-    const cached = readActiveConversationCache();
+    const cached = readActiveConversationCache(cacheOwnerKey);
     if (!cached) return false;
     if (requestedConversationId && cached.conversationId !== requestedConversationId) return false;
 
@@ -321,7 +323,7 @@ export default function Home() {
     setActiveLeafId(cached.activeLeafId);
     conversationHistoryRef.current = cached.history.slice(-MAX_CONVERSATION_HISTORY);
     return hydratedMessages.length > 0;
-  }, []);
+  }, [cacheOwnerKey]);
 
   const endConversation = useCallback(async (conversationId: string) => {
     const sessionSummary = buildSessionSummary();
@@ -365,10 +367,27 @@ export default function Home() {
 
   // Load conversations when user logs in (or on first mount if already logged in)
   useEffect(() => {
-    if (!user) { setConversations([]); return; }
+    if (!user) {
+      setConversations([]);
+      setActiveConversationId(null);
+      setAllMessages([]);
+      setActiveLeafId(null);
+      conversationHistoryRef.current = [];
+      clearActiveConversationCache(cacheOwnerKey);
+      return;
+    }
     
-    // 1. Try to load from local cache first for immediate UI
-    const cachedList = readConversationsListCache();
+    if (previousCacheOwnerKeyRef.current !== cacheOwnerKey) {
+      previousCacheOwnerKeyRef.current = cacheOwnerKey;
+      setConversations([]);
+      setActiveConversationId(null);
+      setAllMessages([]);
+      setActiveLeafId(null);
+      conversationHistoryRef.current = [];
+    }
+
+    // 1. Try to load this user's local cache first for immediate UI
+    const cachedList = readConversationsListCache(cacheOwnerKey);
     if (cachedList && cachedList.length > 0) {
       setConversations(cachedList);
     }
@@ -400,7 +419,7 @@ export default function Home() {
           setConversations((prev) => {
             const hasChanged = JSON.stringify(prev) !== JSON.stringify(mapped);
             if (hasChanged) {
-              writeConversationsListCache(mapped);
+              writeConversationsListCache(mapped, cacheOwnerKey);
               return mapped;
             }
             return prev;
@@ -413,7 +432,7 @@ export default function Home() {
       }
     }
     loadConversations();
-  }, [user]);
+  }, [cacheOwnerKey, user]);
 
   useEffect(() => {
     const history = buildConversationHistoryFromLeaf(allMessages, activeLeafId).slice(-MAX_CONVERSATION_HISTORY);
@@ -421,20 +440,14 @@ export default function Home() {
 
     if (activeConversationId || allMessages.length > 0) {
       writeActiveConversationCache({
+        ownerKey: cacheOwnerKey,
         conversationId: activeConversationId,
         activeLeafId,
         history,
         messages: allMessages,
       });
     }
-  }, [activeConversationId, activeLeafId, allMessages]);
-
-  useEffect(() => {
-    if (activeConversationId || allMessages.length > 0) return;
-    void Promise.resolve().then(() => {
-      restoreCachedConversation();
-    });
-  }, [activeConversationId, allMessages.length, restoreCachedConversation]);
+  }, [activeConversationId, activeLeafId, allMessages, cacheOwnerKey]);
 
   useEffect(() => {
     // Keep onboarding hidden while auth modals or bypass active
@@ -1111,6 +1124,7 @@ export default function Home() {
     conversationHistoryRef.current = [];
     setActiveConversationId(id);
     setActiveLeafId(null);
+    setAllMessages([]);
     setConversations((prev) =>
       prev.map((c) => ({ ...c, isActive: c.id === id }))
     );
@@ -1118,14 +1132,13 @@ export default function Home() {
     try {
       const headers = await getAuthHeaders();
       if (!hasAuthHeaders(headers)) {
-        if (!restoreCachedConversation(id)) {
-          console.warn("No auth session available to load conversation history.");
-        }
+        console.warn("No auth session available to load conversation history.");
+        setActiveConversationId(null);
         return;
       }
 
       // Check if this conversation's messages are already in cache
-      const cached = readActiveConversationCache();
+      const cached = readActiveConversationCache(cacheOwnerKey);
       if (cached && cached.conversationId === id && cached.messages.length > 0) {
         const hydratedMessages = hydrateCachedMessages(cached.messages);
         setAllMessages(hydratedMessages);
@@ -1135,11 +1148,16 @@ export default function Home() {
       }
 
       const res = await fetch(`/api/conversations/${id}`, { headers });
-      if (res.status === 401) {
-        if (!restoreCachedConversation(id)) {
-          console.warn("Conversation history request was unauthorized and no cache was available.");
-        }
+      if (res.status === 401 || res.status === 403 || res.status === 404) {
+        clearActiveConversationCache(cacheOwnerKey);
+        setAllMessages([]);
+        setActiveLeafId(null);
+        setActiveConversationId(null);
+        setConversations((prev) => prev.filter((conversation) => conversation.id !== id));
         return;
+      }
+      if (!res.ok) {
+        throw new Error(`Conversation history request failed (${res.status})`);
       }
       const { data } = await res.json();
       if (data) {
@@ -1154,6 +1172,7 @@ export default function Home() {
 
         // Update cache
         writeActiveConversationCache({
+          ownerKey: cacheOwnerKey,
           conversationId: id,
           activeLeafId: latestLeaf,
           history,
@@ -1162,7 +1181,6 @@ export default function Home() {
       }
     } catch (err) {
       console.error("Failed to load messages:", err);
-      restoreCachedConversation(id);
     }
   };
 
@@ -1225,7 +1243,7 @@ export default function Home() {
     setAttachedFiles([]);
     autoScrollRef.current = true;
     setShowScrollToBottom(false);
-    clearActiveConversationCache();
+    clearActiveConversationCache(cacheOwnerKey);
   };
 
 
@@ -1401,13 +1419,23 @@ export default function Home() {
       typeof window !== "undefined" ? window.location.origin : null,
       selectedRoom.id,
     );
-  // Current user as the only real member
-  const realRoomMembers = [{
+  const [roomMembersSnapshot, setRoomMembersSnapshot] = useState<Array<{
+    id: string;
+    name: string;
+    accent: string;
+    status: "explaining" | "thinking" | "ready";
+  }>>([]);
+  useEffect(() => {
+    setRoomMembersSnapshot([]);
+  }, [activeRoomId]);
+
+  const fallbackRoomMembers = [{
     id: user?.id ?? 'me',
     name: profile.displayName || profile.username || 'You',
     accent: 'linear-gradient(135deg,#7c3aed,#ec4899)',
     status: 'ready' as const,
   }];
+  const realRoomMembers = roomMembersSnapshot.length > 0 ? roomMembersSnapshot : fallbackRoomMembers;
 
   // ── Render ──────────────────────────────────────────────────────────────────
 
@@ -1701,6 +1729,7 @@ export default function Home() {
                   roomId={selectedRoom.id}
                   currentUserId={user?.id}
                   currentDbUserId={dbUserId}
+                  onMembersSnapshotChange={setRoomMembersSnapshot}
                   entitlements={entitlements}
                 />
               ) : (
