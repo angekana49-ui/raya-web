@@ -12,6 +12,16 @@ import {
 } from "@/lib/study-room-data";
 import { createStudyRoom, getActiveRooms, getRoomFiles, getRoomHistory, getRoomInvitePreview, getStudyRoom, joinRoom, mapStudyRoomRow, RoomJoinError, uploadRoomFiles } from "@/services/study-rooms.service";
 
+function getOrCreateInstallationId() {
+  if (typeof window === "undefined") return "";
+  let id = localStorage.getItem("raya_installation_id");
+  if (!id) {
+    id = "inst_" + Math.random().toString(36).substring(2, 15);
+    localStorage.setItem("raya_installation_id", id);
+  }
+  return id;
+}
+
 type UseStudyRoomsOptions = {
   authLoading: boolean;
   isProfileComplete: boolean;
@@ -276,6 +286,21 @@ export function useStudyRooms({
         return;
       }
 
+      if (!authLoading && !isSignedIn) {
+        const { error } = await supabase.auth.signInAnonymously({
+          options: {
+            data: {
+              display_name: "Guest learner",
+              school_level: "High School",
+              installation_id: getOrCreateInstallationId(),
+            }
+          }
+        });
+        if (error) {
+          console.error("Auto guest login failed", error);
+        }
+      }
+
       setStudyRooms((prev) => {
         if (prev.some((room) => room.id === joinedRoom.id)) return prev;
         return [joinedRoom, ...prev];
@@ -386,6 +411,21 @@ export function useStudyRooms({
     if (!joinedRoom) {
       setRoomError("This room invitation is invalid, expired, or full.");
       return false;
+    }
+
+    if (!authLoading && !isSignedIn) {
+      const { error } = await supabase.auth.signInAnonymously({
+        options: {
+          data: {
+            display_name: "Guest learner",
+            school_level: "High School",
+            installation_id: getOrCreateInstallationId(),
+          }
+        }
+      });
+      if (error) {
+        console.error("Auto guest login failed", error);
+      }
     }
 
     setStudyRooms((prev) => {
