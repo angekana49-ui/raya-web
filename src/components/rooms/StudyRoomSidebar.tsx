@@ -192,10 +192,10 @@ export default function StudyRoomSidebar({
   return (
     <aside
       className={cn(
-        "fixed inset-y-2 right-2 z-[70] md:relative md:inset-0 h-[calc(100vh-1rem)] shrink-0 glass-panel rounded-3xl flex flex-col overflow-hidden transition-all duration-300",
+        "fixed inset-y-2 right-2 z-[70] md:relative md:inset-0 h-[calc(100dvh-1rem)] shrink-0 glass-panel rounded-3xl flex flex-col overflow-hidden transition-all duration-300",
         visible
-          ? "w-[82vw] max-w-[320px] translate-x-0 opacity-100 md:w-[320px]"
-          : "pointer-events-none w-0 translate-x-full opacity-0 md:translate-x-0"
+          ? "w-[280px] sm:w-[320px] translate-x-0 opacity-100 md:w-[320px]"
+          : "pointer-events-none w-[280px] sm:w-[320px] translate-x-full opacity-0 md:w-0 md:translate-x-0"
       )}
     >
       <div className="flex items-center justify-between px-4 pb-2 pt-4">

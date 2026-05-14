@@ -117,7 +117,7 @@ export default function ChatInput({
   return (
     <div 
       className={cn(
-        "relative rounded-[28px] border transition-all duration-500 bg-white/80 backdrop-blur-xl shadow-[0_8px_30px_rgba(0,0,0,0.04)] overflow-hidden",
+        "relative rounded-[28px] border transition-all duration-500 bg-white md:bg-white/80 backdrop-blur-none md:backdrop-blur-xl shadow-[0_8px_30px_rgba(0,0,0,0.04)] overflow-hidden",
         isFocused 
           ? "border-indigo-300 ring-4 ring-indigo-500/5 shadow-[0_20px_50px_-12px_rgba(79,70,229,0.12)]" 
           : "border-slate-200 shadow-sm",

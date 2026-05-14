@@ -178,9 +178,9 @@ export default function Sidebar({
     return (
       <aside
         className={cn(
-          "h-[calc(100vh-1rem)] m-2 shrink-0 glass-panel rounded-3xl flex flex-col overflow-hidden transition-all duration-300",
+          "h-[calc(100dvh-1rem)] m-2 shrink-0 glass-panel rounded-3xl flex flex-col overflow-hidden transition-all duration-300",
           visible
-            ? "w-[82vw] max-w-[300px] md:w-[300px] opacity-100"
+            ? "w-[280px] sm:w-[300px] opacity-100"
             : "w-0 opacity-0 pointer-events-none mx-0"
         )}
       />
@@ -215,10 +215,10 @@ export default function Sidebar({
     <>
       <aside
       className={cn(
-        "fixed inset-y-2 left-2 z-[70] md:relative md:inset-0 h-[calc(100vh-1rem)] shrink-0 glass-panel rounded-3xl flex flex-col overflow-hidden transition-all duration-300",
+        "fixed inset-y-2 left-2 z-[70] md:relative md:inset-0 h-[calc(100dvh-1rem)] shrink-0 glass-panel rounded-3xl flex flex-col overflow-hidden transition-all duration-300",
         visible
           ? "w-[280px] sm:w-[300px] opacity-100 translate-x-0"
-          : "w-0 opacity-0 pointer-events-none -translate-x-full md:translate-x-0"
+          : "-translate-x-full opacity-0 pointer-events-none md:translate-x-0 md:w-0 w-[280px] sm:w-[300px]"
       )}
     >
         <div className="flex items-center gap-2 px-4 pt-4 pb-2">

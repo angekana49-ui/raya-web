@@ -106,48 +106,6 @@ const toPublicInsight = (insight: unknown): { exchange_type: string; student_ver
   return { exchange_type, student_verdict, difficulty };
 };
 
-const buildSilentRoomInsight = (
-  userMessage: string,
-  mode: string,
-  actionType: unknown,
-  skipReason: string,
-): Record<string, unknown> => {
-  const analysis = analyzeUserMessage(userMessage);
-  const isAcademic = analysis.subject !== null || analysis.questionType !== 'other';
-  const exchangeType = isAcademic
-    ? analysis.questionType === 'exercise'
-      ? 'exercise'
-      : analysis.questionType === 'correction'
-      ? 'discussion'
-      : 'discussion'
-    : 'social';
-
-  return {
-    exchange_type: exchangeType,
-    student_verdict: 'not_assessed',
-    difficulty:
-      analysis.complexityScore >= 0.66
-        ? 'hard'
-        : analysis.complexityScore >= 0.33
-        ? 'medium'
-        : 'easy',
-    concept_id: analysis.subject ? analysis.subject.toUpperCase() : null,
-    subject_area: analysis.subject,
-    pkm_delta: 0,
-    confidence: 0.55,
-    errors: [],
-    misconceptions: [],
-    intervention_needed: false,
-    source: 'room_silent_backend_observer',
-    room_metadata: {
-      raya_skipped: true,
-      skip_reason: skipReason,
-      mode,
-      action_type: typeof actionType === 'string' ? actionType : null,
-    },
-  };
-};
-
 const buildModeInstruction = (modeId?: string): string => {
   switch (modeId) {
     case 'rush-mode':
@@ -421,13 +379,12 @@ export async function POST(req: NextRequest) {
       entitlementsPromise,
     ]);
 
-    // 1. Restore history from Supabase after access control.
-    // Prefer DB-backed history whenever a conversation id exists, because client caches can be stale or cross-user.
+    // 1. Restore history from Supabase if client-provided history is empty or short
     let safeConversationHistory = Array.isArray(conversationHistory)
       ? conversationHistory.slice(-MAX_HISTORY_MESSAGES)
       : [];
 
-    if (conversationId && userId) {
+    if (safeConversationHistory.length < 2 && conversationId && userId) {
       try {
         const { data: dbMessages } = await supabaseAdmin
           .from('messages')
@@ -626,7 +583,7 @@ export async function POST(req: NextRequest) {
 
         const userMsgId = userMsgSaved?.id;
 
-        if (isRoomRequest && conversationId && shouldRespond) {
+        if (isRoomRequest && conversationId) {
           if (!turnLock.ok) {
             send({ type: 'error', error: turnLock.message, code: turnLock.code });
             controller.close();
@@ -655,23 +612,6 @@ export async function POST(req: NextRequest) {
         const runStream = async (raya: RayaAIService, modelUsed: string) => {
           // ROOM RESPONSE ALGO (Execution phase)
           if (!shouldRespond) {
-            const skipReason =
-              effectiveMode === 'passive'
-                ? 'passive_no_trigger'
-                : 'room_response_rules';
-            const silentInsight = buildSilentRoomInsight(message, effectiveMode || 'normal', actionType, skipReason);
-
-            if (turnKeyBase && userId && conversationId) {
-              logLearningEvent({
-                userId,
-                conversationId,
-                eventType: 'insight_validated',
-                idempotencyKey: `${turnKeyBase}:room_silent_insight`,
-                payload: silentInsight,
-                ruleVersion: RULE_VERSION,
-              }).catch(console.error);
-            }
-
             send({
               type: 'complete',
               content: {
@@ -682,10 +622,13 @@ export async function POST(req: NextRequest) {
                 sessionId: sessionId || `session_${Date.now()}`,
                 userMessageId: userMsgId,
                 rayaSkipped: true,
-                rayaSkipReason: skipReason,
+                rayaSkipReason:
+                  effectiveMode === 'passive'
+                    ? 'passive_no_trigger'
+                    : 'room_response_rules',
               },
             });
-            return { fullText: "", modelUsed, insight: silentInsight };
+            return { fullText: "", modelUsed, insight: null };
           }
 
           if (safeConversationHistory) {

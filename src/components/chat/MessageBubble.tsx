@@ -132,7 +132,29 @@ export default function MessageBubble({
   const isUser = message.sender === "user";
   const [previewFile, setPreviewFile] = useState<AttachedFile | null>(null);
   const [isEditing, setIsEditing] = useState(false);
-  const [editValue, setEditValue] = useState(message.text);
+  
+  let displayMessageText = message.text;
+  let parsedFiles: AttachedFile[] = message.files ? [...message.files] : [];
+
+  if (isUser && displayMessageText) {
+    const fileUrlMatch = displayMessageText.match(/\[Attached file URLs:\s*(.*?)\]/);
+    if (fileUrlMatch) {
+      const urls = fileUrlMatch[1].split(',').map(s => s.trim());
+      urls.forEach(url => {
+        if (!parsedFiles.some(f => f.url === url)) {
+          parsedFiles.push({
+            id: url,
+            name: url.split('/').pop()?.split('?')[0] || 'Attached File',
+            url: url,
+            type: url.includes('.pdf') ? 'pdf' : url.includes('.jpg') || url.includes('.png') ? 'image' : 'document'
+          });
+        }
+      });
+      displayMessageText = displayMessageText.replace(/\[Attached file URLs:\s*(.*?)\]/g, '').trim();
+    }
+  }
+
+  const [editValue, setEditValue] = useState(displayMessageText);
   const editContainerRef = useRef<HTMLDivElement>(null);
 
   // Cancel edit when clicking outside the edit area
@@ -141,7 +163,7 @@ export default function MessageBubble({
     const handleClickOutside = (e: MouseEvent) => {
       if (editContainerRef.current && !editContainerRef.current.contains(e.target as Node)) {
         setIsEditing(false);
-        setEditValue(message.text);
+        setEditValue(displayMessageText);
       }
     };
     // Small delay to avoid the click that opened the editor from immediately closing it
@@ -152,18 +174,18 @@ export default function MessageBubble({
       clearTimeout(timeout);
       document.removeEventListener('mousedown', handleClickOutside);
     };
-  }, [isEditing, message.text]);
+  }, [isEditing, displayMessageText]);
 
   // Auto-cancel edit when the AI starts streaming (user sent another message)
   useEffect(() => {
     if (isStreaming && isEditing) {
       setIsEditing(false);
-      setEditValue(message.text);
+      setEditValue(displayMessageText);
     }
   }, [isStreaming]);
 
   const handleSaveEdit = () => {
-    if (editValue.trim() && editValue !== message.text && onEdit) {
+    if (editValue.trim() && editValue !== displayMessageText && onEdit) {
       onEdit(message.id, editValue.trim());
     }
     setIsEditing(false);
@@ -185,7 +207,7 @@ export default function MessageBubble({
           {!isEditing && onEdit && (
             <button
               onClick={() => {
-                setEditValue(message.text);
+                setEditValue(displayMessageText);
                 setIsEditing(true);
               }}
               className="sm:absolute sm:-left-10 sm:top-2 sm:p-2 p-1.5 rounded-full text-white/60 sm:text-slate-400 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity hover:bg-white/10 sm:hover:bg-slate-100 sm:hover:text-slate-600 float-right ml-2 -mt-1 sm:float-none sm:ml-0 sm:mt-0"
@@ -195,10 +217,10 @@ export default function MessageBubble({
             </button>
           )}
 
-          {message.files && message.files.length > 0 && (
+          {parsedFiles && parsedFiles.length > 0 && (
             <div className="mb-2 -mx-1 px-1 overflow-x-auto">
               <div className="flex gap-2 min-w-max">
-                {message.files.map((file) => (
+                {parsedFiles.map((file) => (
                   <AttachedFileDisplay key={file.id} file={file} onPreview={setPreviewFile} />
                 ))}
               </div>
@@ -217,7 +239,7 @@ export default function MessageBubble({
                     handleSaveEdit();
                   } else if (e.key === 'Escape') {
                     setIsEditing(false);
-                    setEditValue(message.text);
+                    setEditValue(displayMessageText);
                   }
                 }}
                 className="w-full bg-white/10 border border-white/20 rounded-lg p-2 sm:p-2 text-sm sm:text-base text-white placeholder-white/50 focus:outline-none focus:ring-2 focus:ring-white/50 resize-none min-h-[60px] sm:min-h-[80px]"
@@ -228,7 +250,7 @@ export default function MessageBubble({
                   type="button"
                   onClick={() => {
                     setIsEditing(false);
-                    setEditValue(message.text);
+                    setEditValue(displayMessageText);
                   }}
                   className="px-3 py-2 sm:py-1.5 text-xs sm:text-xs font-medium rounded-lg bg-white/10 hover:bg-white/20 active:bg-white/30 transition-colors"
                 >
@@ -237,7 +259,7 @@ export default function MessageBubble({
                 <button
                   type="button"
                   onClick={handleSaveEdit}
-                  disabled={!editValue.trim() || editValue === message.text}
+                  disabled={!editValue.trim() || editValue === displayMessageText}
                   className="px-3 py-2 sm:py-1.5 text-xs sm:text-xs font-medium rounded-lg bg-white text-primary hover:bg-white/90 active:bg-white/80 transition-colors disabled:opacity-50 flex items-center gap-1.5"
                 >
                   <Send className="w-3.5 h-3.5" />
@@ -246,7 +268,7 @@ export default function MessageBubble({
               </div>
             </div>
           ) : (
-            <p className="chat-text text-base whitespace-pre-wrap">{message.text}</p>
+            <p className="chat-text text-base whitespace-pre-wrap">{displayMessageText}</p>
           )}
 
           {siblingCount > 1 && !isEditing && (

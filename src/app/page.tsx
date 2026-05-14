@@ -1487,7 +1487,7 @@ export default function Home() {
         />
       </Suspense>
 
-      <div className="h-[100dvh] flex min-h-0 bg-transparent overflow-hidden selection:bg-indigo-100 selection:text-indigo-900">
+      <div className="fixed inset-0 md:static md:h-[100dvh] flex min-h-0 bg-transparent overflow-hidden selection:bg-indigo-100 selection:text-indigo-900">
         <Sidebar
           visible={sidebarVisible}
           onClose={() => setSidebarVisible(false)}
@@ -1536,7 +1536,7 @@ export default function Home() {
         {/* Main column */}
         <div className="flex-1 min-w-0 min-h-0 flex flex-col bg-transparent">
           {isRoomView && invitedGuestFlow && (
-            <div className="mx-auto mt-2 w-full max-w-[980px] px-3 sm:px-4">
+            <div className="mx-auto mt-2 w-full max-w-[980px] px-3 sm:px-4 shrink-0">
               <div
                 className={`rounded-[24px] border px-4 py-3 shadow-sm backdrop-blur-sm ${
                   roomOnboardingNudgeVisible
@@ -1545,16 +1545,16 @@ export default function Home() {
                 }`}
               >
                 <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                  <div>
-                    <p className="text-[10px] font-black uppercase tracking-[0.22em] text-slate-400">
+                  <div className="flex-1">
+                    <p className="text-[10px] font-black uppercase tracking-[0.22em] text-slate-400 hidden sm:block">
                       {roomOnboardingNudgeVisible ? "Keep your place" : "Instant access active"}
                     </p>
-                    <p className="mt-1 text-sm font-black text-slate-900">
+                    <p className="mt-1 sm:mt-1 text-sm font-black text-slate-900">
                       {roomOnboardingNudgeVisible
                         ? `${invitedGuestAlias}, keep your place in the squad.`
                         : `You're in as ${invitedGuestAlias}. Explore the room first.`}
                     </p>
-                    <p className="mt-1 text-xs leading-relaxed text-slate-600">
+                    <p className="mt-1 text-xs leading-relaxed text-slate-600 hidden sm:block">
                       {roomOnboardingNudgeVisible
                         ? "Choose your name and school level so this room can remember you next time."
                         : "No signup wall right now. You can use the room freely, then claim your identity when you're ready."}
@@ -1580,7 +1580,7 @@ export default function Home() {
           )}
 
           {!isRoomView && (
-            <header className="glass-panel border-t-0 border-x-0 rounded-b-[2rem] mx-2 mt-2 sticky top-2 z-50">
+            <header className="glass-panel border-t-0 border-x-0 rounded-b-[2rem] mx-2 mt-2 relative md:sticky md:top-2 shrink-0 z-50">
               <div className="flex items-center justify-between px-4 py-3 min-h-[60px]">
                 <button
                   onClick={() => {
@@ -2088,7 +2088,7 @@ export default function Home() {
               setSidebarVisible(false);
               setLearningHudVisible(false);
             }}
-            className="fixed inset-0 z-[60] bg-slate-900/40 backdrop-blur-sm md:hidden"
+            className="fixed inset-0 z-[60] bg-slate-900/60 md:hidden"
           />
         )}
       </AnimatePresence>
