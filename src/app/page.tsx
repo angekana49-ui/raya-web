@@ -250,7 +250,7 @@ export default function Home() {
 
   // AI options state
   const [aiMode, setAiMode] = useState("normal");
-  const [selectedModel, setSelectedModel] = useState("gemini-3.1-flash-lite-preview");
+  const [selectedModel, setSelectedModel] = useState("gemini-3.1-flash-lite");
 
   const enqueuePopup = useCallback((popup: PopupQueueItem) => {
     setPopupQueue((current) => [...current, popup]);
@@ -273,7 +273,7 @@ export default function Home() {
     setSelectedModel((current) => (
       entitlements.availableModels.includes(current)
         ? current
-        : getFirstUnlockedModel(entitlements, "gemini-3.1-flash-lite-preview")
+        : getFirstUnlockedModel(entitlements, "gemini-3.1-flash-lite")
     ));
   }, [entitlements.availableModels, entitlements.availableModes]);
 

@@ -30,7 +30,7 @@ export const DEFAULT_USER_ENTITLEMENTS: UserEntitlements = {
   roomMinutesLimit: 60,
   xpMultiplier: 1,
   availableModes: ["normal"],
-  availableModels: ["gemini-3.1-flash-lite-preview"],
+  availableModels: ["gemini-3.1-flash-lite"],
   badges: [],
 };
 
@@ -110,6 +110,6 @@ export function getFirstUnlockedMode(entitlements: UserEntitlements, fallback = 
   return entitlements.availableModes[0] ?? fallback;
 }
 
-export function getFirstUnlockedModel(entitlements: UserEntitlements, fallback = "gemini-3.1-flash-lite-preview"): string {
+export function getFirstUnlockedModel(entitlements: UserEntitlements, fallback = "gemini-3.1-flash-lite"): string {
   return entitlements.availableModels[0] ?? fallback;
 }

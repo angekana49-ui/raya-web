@@ -63,7 +63,7 @@ export async function getUserEntitlementsForUser(userId: string): Promise<UserEn
     roomMinutesLimit: 60,
     xpMultiplier: 1,
     availableModes: levelUpActive || hasPremiumAccess ? ["normal", "rush-mode"] : ["normal"],
-    availableModels: ["gemini-3.1-flash-lite-preview"],
+    availableModels: ["gemini-3.1-flash-lite"],
     badges: levelUpActive ? ["level_up"] : [],
   });
 
@@ -87,7 +87,7 @@ export async function getUserEntitlementsForUser(userId: string): Promise<UserEn
       roomMinutesLimit: 90,
       xpMultiplier: 2,
       availableModes: ["normal", "rush-mode", "deep-thinking", "creative-mode"],
-      availableModels: ["gemini-3.1-flash-lite-preview", "gpt-4-turbo", "gpt-4", "claude-sonnet"],
+      availableModels: ["gemini-3.1-flash-lite", "gpt-4-turbo", "gpt-4", "claude-sonnet"],
       badges: ["pro"],
     };
   } else if (isPlus) {
@@ -98,7 +98,7 @@ export async function getUserEntitlementsForUser(userId: string): Promise<UserEn
       roomMinutesLimit: 120,
       xpMultiplier: 3,
       availableModes: ["normal", "rush-mode", "deep-thinking", "creative-mode"],
-      availableModels: ["gemini-3.1-flash-lite-preview", "gpt-4-turbo", "gpt-4", "claude-sonnet"],
+      availableModels: ["gemini-3.1-flash-lite", "gpt-4-turbo", "gpt-4", "claude-sonnet"],
       badges: ["plus"],
     };
   }

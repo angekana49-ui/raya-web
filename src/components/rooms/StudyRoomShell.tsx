@@ -135,7 +135,7 @@ export default function StudyRoomShell({
     assistantTempId?: string;
   } | null>(null);
   const [aiModeInternal, setAiModeInternal] = useState<"passive" | "active">(roomAiMode || "active");
-  const [aiModelInternal, setAiModelInternal] = useState("gemini-3.1-flash-lite-preview");
+  const [aiModelInternal, setAiModelInternal] = useState("gemini-3.1-flash-lite");
   const [changesRemaining, setChangesRemaining] = useState(isCreator ? 5 : 1);
   const [liveOnlineCount, setLiveOnlineCount] = useState(onlineCount);
   const streamingTurnRef = useRef<string | null>(null);

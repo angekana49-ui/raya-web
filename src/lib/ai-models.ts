@@ -4,7 +4,7 @@ import type { AIModel, ChatMode } from "@/types";
 
 export const AI_MODELS: AIModel[] = [
   {
-    id: "gemini-3.1-flash-lite-preview",
+    id: "gemini-3.1-flash-lite",
     name: "Gemini 3.1",
     provider: "google",
     description: "Fast and efficient default model",
@@ -90,7 +90,7 @@ export const CHAT_MODES: ChatMode[] = [
 ];
 
 export const DEFAULT_CONFIG = {
-  model: "gemini-3.1-flash-lite-preview",
+  model: "gemini-3.1-flash-lite",
   mode: "normal",
   temperature: 0.5,
   maxTokens: 2000,

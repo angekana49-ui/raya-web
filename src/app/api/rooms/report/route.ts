@@ -106,7 +106,7 @@ export async function POST(req: NextRequest) {
 
     const raya = new RayaAIService({
       apiKey: process.env.GEMINI_API_KEY!,
-      model: 'gemini-3.1-flash-lite-preview',
+      model: 'gemini-3.1-flash-lite',
       temperature: 0.4,
     });
 

@@ -139,7 +139,7 @@ export class RayaAIService {
     this.config = {
       apiKey: config.apiKey,
       baseURL: config.baseURL,
-      model: config.model || (this.provider === 'gemini' ? 'gemini-3.1-flash-lite-preview' : 'gpt-4o-mini'),
+      model: config.model || (this.provider === 'gemini' ? 'gemini-3.1-flash-lite' : 'gpt-4o-mini'),
       temperature: config.temperature || 0.75,
       maxTokens: config.maxTokens || 4096,
       thinkingBudget: config.thinkingBudget,

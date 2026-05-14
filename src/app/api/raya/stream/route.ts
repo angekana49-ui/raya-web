@@ -230,7 +230,7 @@ const buildGeminiInstance = (
   return new RayaAIService({
     provider: 'gemini' as AIProvider,
     apiKey,
-    model: requestedModel || process.env.GEMINI_MODEL || 'gemini-3.1-flash-lite-preview',
+    model: requestedModel || process.env.GEMINI_MODEL || 'gemini-3.1-flash-lite',
     temperature: parseFloat(process.env.RAYA_TEMPERATURE || '0.75'),
     maxTokens: parseInt(process.env.RAYA_MAX_TOKENS || '4096'),
     thinkingLevel: process.env.GEMINI_THINKING_LEVEL || 'MEDIUM',
@@ -432,10 +432,10 @@ export async function POST(req: NextRequest) {
           : getFirstUnlockedMode(entitlements, 'normal'))
       : String(aiMode || 'normal');
     const effectiveModel = entitlements
-      ? (isModelUnlocked(entitlements, String(model || 'gemini-3.1-flash-lite-preview'))
-          ? String(model || 'gemini-3.1-flash-lite-preview')
-          : getFirstUnlockedModel(entitlements, 'gemini-3.1-flash-lite-preview'))
-      : String(model || 'gemini-3.1-flash-lite-preview');
+      ? (isModelUnlocked(entitlements, String(model || 'gemini-3.1-flash-lite'))
+          ? String(model || 'gemini-3.1-flash-lite')
+          : getFirstUnlockedModel(entitlements, 'gemini-3.1-flash-lite'))
+      : String(model || 'gemini-3.1-flash-lite');
 
     const effectiveUserTier = entitlements?.hasPremiumAccess ? 'premium' : 'free';
     const requestedModelInfo = getModelById(effectiveModel);
@@ -694,7 +694,7 @@ export async function POST(req: NextRequest) {
             try {
               result = await runStream(
                 buildGeminiInstance(finalStudentContext, geminiRequestedModel, systemPrompt, isRoomRequest ? ROOM_SYSTEM_PROMPT_PATH : SOLO_SYSTEM_PROMPT_PATH),
-                geminiRequestedModel || process.env.GEMINI_MODEL || 'gemini-3.1-flash-lite-preview'
+                geminiRequestedModel || process.env.GEMINI_MODEL || 'gemini-3.1-flash-lite'
               );
             } catch (geminiError: any) {
               const openaiKey = process.env.RAYA_API_KEY;
