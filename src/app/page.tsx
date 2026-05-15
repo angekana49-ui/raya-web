@@ -2077,21 +2077,6 @@ export default function Home() {
         onClose={closeActivePopup}
       />
 
-      {/* Mobile Sidebar Overlay */}
-      <AnimatePresence>
-        {(sidebarVisible || learningHudVisible) && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            onClick={() => {
-              setSidebarVisible(false);
-              setLearningHudVisible(false);
-            }}
-            className="fixed inset-0 z-[60] bg-slate-900/60 md:hidden"
-          />
-        )}
-      </AnimatePresence>
     </>
   );
 }
