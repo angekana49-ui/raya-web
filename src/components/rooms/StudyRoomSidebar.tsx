@@ -191,6 +191,7 @@ export default function StudyRoomSidebar({
   const showKnownMembersOnly = members.length < effectiveOnlineCount;
   return (
     <aside
+      data-sidebar-panel
       className={cn(
         "fixed inset-y-2 right-2 z-[70] md:relative md:inset-0 h-[calc(100dvh-1rem)] shrink-0 glass-panel rounded-3xl flex flex-col overflow-hidden transition-all duration-300",
         visible

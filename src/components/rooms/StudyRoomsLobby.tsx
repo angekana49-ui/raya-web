@@ -59,6 +59,7 @@ export default function StudyRoomsLobby({
           <div className="mx-auto flex max-w-5xl items-center justify-between rounded-[1.75rem] border border-slate-200/80 bg-white/80 px-4 py-3 shadow-[0_10px_30px_rgba(15,23,42,0.06)] backdrop-blur-sm">
             <button
               type="button"
+              data-sidebar-toggle
               onClick={onToggleSidebar}
               aria-label="Open sidebar"
               className="flex h-10 w-10 items-center justify-center rounded-full bg-slate-100 text-slate-700 transition-colors hover:bg-slate-200"
@@ -73,6 +74,7 @@ export default function StudyRoomsLobby({
 
             <button
               type="button"
+              data-sidebar-toggle
               onClick={onTogglePanel}
               aria-label={panelOpen ? "Hide room sidebar" : "Show room sidebar"}
               className="flex h-10 w-10 items-center justify-center rounded-full bg-slate-100 text-slate-700 transition-colors hover:bg-slate-200"

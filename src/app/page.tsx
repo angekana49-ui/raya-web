@@ -2,7 +2,7 @@
 
 import dynamic from "next/dynamic";
 import Image from "next/image";
-import { useState, useRef, useEffect, useCallback, useMemo } from "react";
+import { useState, useRef, useEffect, useCallback, useMemo, type PointerEvent } from "react";
 import { Suspense } from "react";
 import AuthRedirectHandler from "@/components/auth/AuthRedirectHandler";
 import { motion, AnimatePresence } from "framer-motion";
@@ -262,6 +262,42 @@ export default function Home() {
       popupTimeoutRef.current = null;
     }
     setActivePopup(null);
+  }, []);
+
+  const closeMobileSidebars = useCallback(() => {
+    if (typeof window === "undefined" || window.innerWidth >= 768) return;
+    setSidebarVisible(false);
+    setLearningHudVisible(false);
+  }, []);
+
+  const handleSidebarBackdropPress = useCallback((event: PointerEvent<HTMLElement>) => {
+    if (typeof window === "undefined" || window.innerWidth >= 768) return;
+    if (!sidebarVisible && !learningHudVisible) return;
+
+    const target = event.target as HTMLElement | null;
+    if (target?.closest("[data-sidebar-toggle], [data-sidebar-panel]")) return;
+
+    closeMobileSidebars();
+  }, [closeMobileSidebars, learningHudVisible, sidebarVisible]);
+
+  const handleToggleLeftSidebar = useCallback(() => {
+    if (typeof window !== "undefined" && window.innerWidth < 768) {
+      setLearningHudVisible(false);
+      setSidebarVisible((prev) => !prev);
+      return;
+    }
+
+    setSidebarVisible((prev) => !prev);
+  }, []);
+
+  const handleToggleRightSidebar = useCallback(() => {
+    if (typeof window !== "undefined" && window.innerWidth < 768) {
+      setSidebarVisible(false);
+      setLearningHudVisible((prev) => !prev);
+      return;
+    }
+
+    setLearningHudVisible((prev) => !prev);
   }, []);
 
   useEffect(() => {
@@ -1487,7 +1523,10 @@ export default function Home() {
         />
       </Suspense>
 
-      <div className="fixed inset-0 md:static md:h-[100dvh] flex min-h-0 bg-transparent overflow-hidden selection:bg-indigo-100 selection:text-indigo-900">
+      <div
+        className="fixed inset-0 md:static md:h-[100dvh] flex min-h-0 bg-transparent overflow-hidden selection:bg-indigo-100 selection:text-indigo-900"
+        onPointerDownCapture={handleSidebarBackdropPress}
+      >
         <Sidebar
           visible={sidebarVisible}
           onClose={() => setSidebarVisible(false)}
@@ -1583,15 +1622,8 @@ export default function Home() {
             <header className="glass-panel border-t-0 border-x-0 rounded-b-[2rem] mx-2 mt-2 relative md:sticky md:top-2 shrink-0 z-50">
               <div className="flex items-center justify-between px-4 py-3 min-h-[60px]">
                 <button
-                  onClick={() => {
-                    const isMobile = window.innerWidth < 768;
-                    if (isMobile && !sidebarVisible) {
-                      setLearningHudVisible(false);
-                      setSidebarVisible(true);
-                    } else {
-                      setSidebarVisible(prev => !prev);
-                    }
-                  }}
+                  data-sidebar-toggle
+                  onClick={handleToggleLeftSidebar}
                   aria-label={sidebarVisible ? "Close sidebar" : "Open sidebar"}
                   className="w-9 h-9 rounded-full bg-slate-100 flex items-center justify-center hover:bg-slate-200 transition-colors"
                 >
@@ -1607,15 +1639,8 @@ export default function Home() {
                 </div>
 
                 <button
-                  onClick={() => {
-                    const isMobile = window.innerWidth < 768;
-                    if (isMobile && !learningHudVisible) {
-                      setSidebarVisible(false);
-                      setLearningHudVisible(true);
-                    } else {
-                      setLearningHudVisible(prev => !prev);
-                    }
-                  }}
+                  data-sidebar-toggle
+                  onClick={handleToggleRightSidebar}
                   aria-label={learningHudVisible ? "Hide progress panel" : "Show progress panel"}
                   className="w-9 h-9 rounded-full bg-slate-100 flex items-center justify-center hover:bg-slate-200 transition-colors"
                 >
@@ -1715,8 +1740,8 @@ export default function Home() {
                   events={[]}
                   onInvite={() => setInviteRoomModalOpen(true)}
                   onEngage={registerInvitedGuestEngagement}
-                  onToggleSidebar={() => setSidebarVisible((prev) => !prev)}
-                  onTogglePanel={() => setLearningHudVisible((prev) => !prev)}
+                  onToggleSidebar={handleToggleLeftSidebar}
+                  onTogglePanel={handleToggleRightSidebar}
                   onReturnToLobby={() => {
                     setActiveView("rooms");
                     setActiveRoomId(null);
@@ -1737,8 +1762,8 @@ export default function Home() {
                   rooms={studyRooms}
                   onCreateRoom={() => setCreateRoomModalOpen(true)}
                   onJoinRoom={() => setJoinRoomModalOpen(true)}
-                  onToggleSidebar={() => setSidebarVisible((prev) => !prev)}
-                  onTogglePanel={() => setLearningHudVisible((prev) => !prev)}
+                  onToggleSidebar={handleToggleLeftSidebar}
+                  onTogglePanel={handleToggleRightSidebar}
                   panelOpen={learningHudVisible}
                   onSelectRoom={(id) => {
                     setActiveView("rooms");

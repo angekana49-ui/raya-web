@@ -1090,6 +1090,7 @@ export default function StudyRoomShell({
             <div className="flex items-center gap-2">
               <button
                 type="button"
+                data-sidebar-toggle
                 onClick={onToggleSidebar}
                 className="flex h-8 w-8 items-center justify-center rounded-full bg-slate-50 text-slate-600 transition-colors hover:bg-slate-100"
               >
@@ -1135,6 +1136,7 @@ export default function StudyRoomShell({
             <div className="flex items-center gap-1.5">
               <button
                 type="button"
+                data-sidebar-toggle
                 onClick={onTogglePanel}
                 className="flex h-8 w-8 items-center justify-center rounded-full bg-slate-50 text-slate-600 transition-colors hover:bg-slate-100"
               >

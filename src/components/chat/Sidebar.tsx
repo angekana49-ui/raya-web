@@ -214,13 +214,14 @@ export default function Sidebar({
   return (
     <>
       <aside
-      className={cn(
-        "fixed inset-y-2 left-2 z-[70] md:relative md:inset-0 h-[calc(100dvh-1rem)] shrink-0 glass-panel rounded-3xl flex flex-col overflow-hidden transition-all duration-300",
-        visible
-          ? "w-[280px] sm:w-[300px] opacity-100 translate-x-0"
-          : "-translate-x-full opacity-0 pointer-events-none md:translate-x-0 md:w-0 w-[280px] sm:w-[300px]"
-      )}
-    >
+        data-sidebar-panel
+        className={cn(
+          "fixed inset-y-2 left-2 z-[70] md:relative md:inset-0 h-[calc(100dvh-1rem)] shrink-0 glass-panel rounded-3xl flex flex-col overflow-hidden transition-all duration-300",
+          visible
+            ? "w-[280px] sm:w-[300px] opacity-100 translate-x-0"
+            : "-translate-x-full opacity-0 pointer-events-none md:translate-x-0 md:w-0 w-[280px] sm:w-[300px]"
+        )}
+      >
         <div className="flex items-center gap-2 px-4 pt-4 pb-2">
           <Image src="/raya-logo.jpeg" alt="RAYA" width={32} height={32} className="rounded-lg object-cover" />
           <span className="flex-1 text-lg font-bold text-primary">

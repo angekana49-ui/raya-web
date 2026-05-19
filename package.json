@@ -12,12 +12,13 @@
   "dependencies": {
     "@google/genai": "^1.42.0",
     "@supabase/supabase-js": "^2.95.3",
+    "@vercel/analytics": "^2.0.1",
     "clsx": "^2.1.1",
     "dotenv": "^16.4.5",
     "framer-motion": "^12.27.3",
     "katex": "^0.16.33",
     "lucide-react": "^0.562.0",
-    "next": "16.1.4",
+    "next": "^16.2.6",
     "openai": "^6.22.0",
     "react": "19.2.3",
     "react-dom": "19.2.3",
@@ -34,9 +35,12 @@
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "eslint": "^9",
-    "eslint-config-next": "16.1.4",
+    "eslint-config-next": "^16.2.6",
     "tailwindcss": "^4",
     "ts-node": "^10.9.2",
     "typescript": "^5"
+  },
+  "overrides": {
+    "postcss": "^8.5.15"
   }
 }

@@ -79,6 +79,7 @@ export default function ProgressSidebar({
 
   return (
     <aside
+      data-sidebar-panel
       className={cn(
         "fixed inset-y-2 right-2 z-[70] md:relative md:inset-0 h-[calc(100vh-1rem)] shrink-0 glass-panel rounded-3xl flex flex-col overflow-hidden transition-all duration-300",
         visible
