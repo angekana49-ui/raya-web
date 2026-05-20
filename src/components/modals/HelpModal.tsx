@@ -72,9 +72,10 @@ const faqItems: FAQItem[] = [
     question: "How to upgrade to a higher plan?",
     icon: <CreditCard className="w-5 h-5 text-emerald-500" />,
     answer: [
-      "Premium subscriptions will unlock higher or unlimited usage limits.",
-      "You will also have access to advanced features: deep learning, creative mode, extended file generation, AI model choice, etc.",
-      "Plans are not yet available, but we are working to make them accessible very soon.",
+      "First, verify your account. Verified students get stronger limits and full history access.",
+      "If you also have a Level Up Code, your verified account unlocks more value before premium: Creative Mode, higher limits, and a stronger study profile.",
+      "Later, premium plans will unlock the full power stack: advanced models, deeper reasoning modes, more uploads, longer rooms, and stronger boosters.",
+      "Plans are intentionally visible already so we can learn whether students are ready to pay for more power.",
       "Important: As our platform is mainly used by minor students, we recommend parents/guardians supervise and validate any payment.",
     ],
   },
@@ -106,7 +107,7 @@ export default function HelpModal({ isOpen, onClose }: HelpModalProps) {
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="fixed inset-0 bg-black/50 z-[60]"
+            className="zen-backdrop z-[60]"
             onClick={onClose}
           />
 

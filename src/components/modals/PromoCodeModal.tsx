@@ -3,37 +3,64 @@
 import { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { X, Gift, CheckCircle, AlertCircle } from "lucide-react";
+import { supabase } from "@/lib/supabase/client";
+import { normalizeUserEntitlements, type UserEntitlements } from "@/lib/user-entitlements";
 
 interface PromoCodeModalProps {
   isOpen: boolean;
   onClose: () => void;
+  onApplied?: (entitlements: UserEntitlements) => void;
 }
 
-export default function PromoCodeModal({ isOpen, onClose }: PromoCodeModalProps) {
+export default function PromoCodeModal({ isOpen, onClose, onApplied }: PromoCodeModalProps) {
   const [code, setCode] = useState("");
   const [status, setStatus] = useState<"idle" | "success" | "error">("idle");
   const [isLoading, setIsLoading] = useState(false);
+  const [message, setMessage] = useState("");
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!code.trim()) return;
 
     setIsLoading(true);
-    // Simulate promo code validation.
-    await new Promise((resolve) => setTimeout(resolve, 1000));
+    setMessage("");
 
-    // Demo only: accept code "RAYA2024".
-    if (code.toUpperCase() === "RAYA2024") {
+    const { data, error } = await supabase.rpc("redeem_level_up_code", {
+      p_code: code.trim().toUpperCase(),
+    });
+
+    if (error) {
+      setStatus("error");
+      setMessage(error.message || "Invalid or expired Level Up Code");
+      setIsLoading(false);
+      return;
+    }
+
+    const payload = (data && typeof data === "object") ? data as {
+      redeemed?: boolean;
+      alreadyRedeemed?: boolean;
+      message?: string;
+      entitlements?: unknown;
+    } : null;
+
+    if (payload?.redeemed || payload?.alreadyRedeemed) {
       setStatus("success");
+      setMessage(payload?.message || "Level Up Code applied successfully!");
+      if (payload?.entitlements) {
+        onApplied?.(normalizeUserEntitlements(payload.entitlements));
+      }
     } else {
       setStatus("error");
+      setMessage(payload?.message || "Invalid or expired Level Up Code");
     }
+
     setIsLoading(false);
   };
 
   const handleClose = () => {
     setCode("");
     setStatus("idle");
+    setMessage("");
     onClose();
   };
 
@@ -45,7 +72,7 @@ export default function PromoCodeModal({ isOpen, onClose }: PromoCodeModalProps)
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="fixed inset-0 bg-black/50 z-[60]"
+            className="zen-backdrop z-[60]"
             onClick={handleClose}
           />
 
@@ -65,7 +92,7 @@ export default function PromoCodeModal({ isOpen, onClose }: PromoCodeModalProps)
                   <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center">
                     <Gift className="w-5 h-5 text-primary" />
                   </div>
-                  <h2 className="text-lg font-bold text-gray-900">Promo Code</h2>
+                  <h2 className="text-lg font-bold text-gray-900">Level Up Code</h2>
                 </div>
                 <button
                   onClick={handleClose}
@@ -78,31 +105,25 @@ export default function PromoCodeModal({ isOpen, onClose }: PromoCodeModalProps)
               <div className="p-5">
                 <div className="bg-blue-50 rounded-xl p-4 mb-5">
                   <p className="text-sm text-blue-800 leading-relaxed">
-                    <span className="font-semibold">Promo code benefits:</span>
+                    <span className="font-semibold">If you got a Level Up Code, enter it here to unlock a few extra perks.</span>
                   </p>
                   <ul className="mt-2 space-y-1.5 text-sm text-blue-700">
                     <li className="flex items-start gap-2">
                       <span className="text-blue-500 mt-0.5">-</span>
                       <span>
-                        <strong>Annual subscription:</strong> 1 month free
+                        <strong>Rush Mode</strong> unlocked in the app right away
                       </span>
                     </li>
                     <li className="flex items-start gap-2">
                       <span className="text-blue-500 mt-0.5">-</span>
                       <span>
-                        <strong>Monthly subscription:</strong> 1 week free
+                        <strong>Creative Mode + bigger limits</strong> after email verification
                       </span>
                     </li>
                     <li className="flex items-start gap-2">
                       <span className="text-blue-500 mt-0.5">-</span>
                       <span>
-                        <strong>Free plan:</strong> 2 weeks free
-                      </span>
-                    </li>
-                    <li className="flex items-start gap-2">
-                      <span className="text-blue-500 mt-0.5">-</span>
-                      <span>
-                        <strong>For everyone:</strong> 15% off first subscription
+                        <strong>50% off</strong> the first subscription
                       </span>
                     </li>
                   </ul>
@@ -111,7 +132,7 @@ export default function PromoCodeModal({ isOpen, onClose }: PromoCodeModalProps)
                 <form onSubmit={handleSubmit}>
                   <div className="mb-4">
                     <label htmlFor="promo-code" className="block text-sm font-medium text-gray-700 mb-2">
-                      Enter your promo code
+                      Enter your Level Up Code
                     </label>
                     <input
                       id="promo-code"
@@ -137,7 +158,7 @@ export default function PromoCodeModal({ isOpen, onClose }: PromoCodeModalProps)
                       >
                         <CheckCircle className="w-5 h-5 text-green-500" />
                         <span className="text-sm text-green-700 font-medium">
-                          Promo code applied successfully!
+                          {message || "Level Up Code applied successfully!"}
                         </span>
                       </motion.div>
                     )}
@@ -151,7 +172,7 @@ export default function PromoCodeModal({ isOpen, onClose }: PromoCodeModalProps)
                       >
                         <AlertCircle className="w-5 h-5 text-red-500" />
                         <span className="text-sm text-red-700 font-medium">
-                          Invalid or expired promo code
+                          {message || "Invalid or expired Level Up Code"}
                         </span>
                       </motion.div>
                     )}

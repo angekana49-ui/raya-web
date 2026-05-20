@@ -1,51 +1,104 @@
 "use client";
 
-import { useState, useRef, useEffect, useCallback, useMemo } from "react";
+import dynamic from "next/dynamic";
+import Image from "next/image";
+import { useState, useRef, useEffect, useCallback, useMemo, type PointerEvent } from "react";
 import { Suspense } from "react";
 import AuthRedirectHandler from "@/components/auth/AuthRedirectHandler";
 import { motion, AnimatePresence } from "framer-motion";
+
+// Modals & Secondary components lazy-loaded
+const PromptsModal = dynamic(() => import("@/components/chat/PromptsModal"), { ssr: false });
+const ProgressSidebar = dynamic(() => import("@/components/chat/ProgressSidebar"), { ssr: false });
+const StudyRoomShell = dynamic(() => import("@/components/rooms/StudyRoomShell"), { ssr: false });
+const StudyRoomSidebar = dynamic(() => import("@/components/rooms/StudyRoomSidebar"), { ssr: false });
+const StudyRoomsLobby = dynamic(() => import("@/components/rooms/StudyRoomsLobby"), { ssr: false });
+const AIOptionsMenu = dynamic(() => import("@/components/menus/AIOptionsMenu"), { ssr: false });
+const FilePickerMenu = dynamic(() => import("@/components/menus/FilePickerMenu"), { ssr: false });
+const ModelPickerMenu = dynamic(() => import("@/components/menus/ModelPickerMenu"), { ssr: false });
+const AuthModal = dynamic(() => import("@/components/modals/AuthModal"), { ssr: false });
+const EarnHeartsModal = dynamic(() => import("@/components/modals/EarnHeartsModal"), { ssr: false });
+const XPOverviewModal = dynamic(() => import("@/components/modals/XPOverviewModal"), { ssr: false });
+const OnboardingModal = dynamic(() => import("@/components/modals/OnboardingModal"), { ssr: false });
+const PromoCodeModal = dynamic(() => import("@/components/modals/PromoCodeModal"), { ssr: false });
+const CreateRoomModal = dynamic(() => import("@/components/modals/CreateRoomModal"), { ssr: false });
+const JoinRoomModal = dynamic(() => import("@/components/modals/JoinRoomModal"), { ssr: false });
+const InviteRoomModal = dynamic(() => import("@/components/modals/InviteRoomModal"), { ssr: false });
+const RayaCardModal = dynamic(() => import("@/components/modals/RayaCardModal").then(m => m.RayaCardModal), { ssr: false });
+const LoginRecoveryModal = dynamic(() => import("@/components/modals/LoginRecoveryModal").then(m => m.LoginRecoveryModal), { ssr: false });
+const SmartPopup = dynamic(() => import("@/components/ui/SmartPopup"), { ssr: false });
+
 import {
   Menu,
   Lightbulb,
   Camera,
   FileText,
   ChevronRight,
-  ChevronDown,
   UserPlus,
   Heart,
+  Mail,
   LogOut,
 } from "lucide-react";
-import type { Message, AttachedFile, Conversation } from "@/types";
+import { Message, AttachedFile, Conversation, StudyRoomPreview } from "@/types";
 
 // Components
-import MessageBubble, { TypingIndicator } from "@/components/chat/MessageBubble";
-import EmptyState from "@/components/chat/EmptyState";
-import ChatInput from "@/components/chat/ChatInput";
-import GamificationToast from "@/components/chat/GamificationToast";
 import Sidebar from "@/components/chat/Sidebar";
-import PromptsModal from "@/components/chat/PromptsModal";
-import ProgressSidebar from "@/components/chat/ProgressSidebar";
-import AIOptionsMenu from "@/components/menus/AIOptionsMenu";
-import FilePickerMenu from "@/components/menus/FilePickerMenu";
-import ModelPickerMenu from "@/components/menus/ModelPickerMenu";
-import AuthModal from "@/components/modals/AuthModal";
-import EarnHeartsModal from "@/components/modals/EarnHeartsModal";
-import XPOverviewModal from "@/components/modals/XPOverviewModal";
-// OnboardingModal kept in file but not triggered — RAYA handles onboarding naturally in conversation
-// import OnboardingModal from "@/components/modals/OnboardingModal";
+import ChatWorkspace from "@/components/chat/ChatWorkspace";
 import { NoTranslate } from "@/components/ui/NoTranslate";
+import { type SmartPopupContent } from "@/components/ui/SmartPopup";
 import { useGamification, getNetMessages } from "@/hooks/useGamification";
 import type { BadgeItem, GamificationState } from "@/hooks/useGamification";
+import { useStudyRooms } from "@/hooks/useStudyRooms";
 import { useAuth } from "@/hooks/useAuth";
+import { useUserEntitlements } from "@/hooks/useUserEntitlements";
 import { useUserProfile } from "@/hooks/useUserProfile";
-import type { UserProfile } from "@/hooks/useUserProfile";
+import type { AuthResetSession, UserProfile } from "@/hooks/useUserProfile";
 import { supabase } from "@/lib/supabase/client";
+import {
+  buildConversationHistoryFromLeaf,
+  buildConversationHistoryFromRecords,
+  findDeepestRecentLeaf,
+  findMessage,
+  getActiveThread,
+  getLatestLeafId,
+  getSiblingMessages,
+  mapConversationRecord,
+  mapMessageRecord,
+  type ConversationRecord,
+  type MessageRecord,
+} from "@/lib/chat-thread";
+import { getOrCreateInstallationId } from "@/lib/guest";
 import { analyzeUserMessage, evaluateExchange } from "@/lib/assessment-engine";
 import type { MessageAnalysis } from "@/lib/assessment-engine";
 import { getLevelInfo } from "@/lib/level-titles";
 import { SessionAggregator } from "@/lib/session-aggregator";
 import type { SessionSummaryPayload } from "@/lib/session-aggregator";
+import {
+  buildStudyRoomInviteUrl,
+} from "@/lib/study-room-data";
+import {
+  getFirstUnlockedMode,
+  getFirstUnlockedModel,
+  type UserEntitlements,
+} from "@/lib/user-entitlements";
 import type { RayaInsight } from "@/services/raya-ai.service";
+import { APP_SETTINGS_EVENT, applyReduceMotion, readAppSettings } from "@/lib/app-settings";
+import { canShowPopup, markPopupSeen } from "@/lib/popup-cadence";
+import {
+  clearActiveConversationCache,
+  hydrateCachedMessages,
+  readActiveConversationCache,
+  readConversationsListCache,
+  writeActiveConversationCache,
+  writeConversationsListCache,
+} from "@/lib/conversation-cache";
+
+type PopupQueueItem = Omit<SmartPopupContent, "open" | "onClose"> & {
+  durationMs?: number;
+};
+
+const MAX_CONVERSATION_HISTORY = 20;
+const STREAM_REQUEST_TIMEOUT_MS = 30000; // Réduit à 30s pour éviter l'impression de boucle infinie
 
 async function getAuthHeaders(): Promise<Record<string, string>> {
   const { data: { session } } = await supabase.auth.getSession();
@@ -53,11 +106,25 @@ async function getAuthHeaders(): Promise<Record<string, string>> {
   return { Authorization: `Bearer ${session.access_token}` };
 }
 
+function hasAuthHeaders(headers: Record<string, string>) {
+  return typeof headers.Authorization === "string" && headers.Authorization.length > 0;
+}
+
 function buildStudentContext(
   g: GamificationState,
   profile: UserProfile | null | undefined,
 ): string {
-  const safeProfile: UserProfile = profile ?? { displayName: "", schoolLevel: "" };
+  const safeProfile: UserProfile = profile ?? {
+    username: "",
+    displayName: "",
+    schoolLevel: "",
+    hasEmail: false,
+    hasVerifiedEmail: false,
+    authMethod: "anonymous",
+    accountState: "onboarding_pending",
+    planTier: "free",
+    onboardingCompleted: false,
+  };
   const missions = Array.isArray(g.todaysMissions) ? g.todaysMissions : [];
   const levelInfo = getLevelInfo(g.totalXp);
   const streakText = g.streakCount > 0
@@ -66,8 +133,7 @@ function buildStudentContext(
 
   const missionLines = missions.map((m) => {
     const check = m.completed ? "✓" : "○";
-    const tag = m.isDaily ? " [Daily Challenge]" : m.isBonus ? " [Bonus]" : "";
-    return `- [${check}] ${m.title}${tag} (${m.current}/${m.target})`;
+    return `- [${check}] ${m.title} (${m.current}/${m.target})`;
   }).join("\n");
 
   return `## 14. LIVE STUDENT CONTEXT — THIS SESSION
@@ -87,20 +153,6 @@ ${missionLines}
 - If a mission is a Daily Challenge → generate one original, challenging academic question adapted to their level
 - Never mention XP amounts, hearts, or mission rewards — the app UI handles that
 `;
-}
-
-/** Trace from a leaf message back to the root to get the linear conversation branch. */
-function getActiveThread(allMessages: Message[], leafId: string | null): Message[] {
-  if (!leafId || allMessages.length === 0) return [];
-  const byId: Record<string, Message> = {};
-  for (const m of allMessages) byId[m.id] = m;
-  const thread: Message[] = [];
-  let cur: string | null = leafId;
-  while (cur && byId[cur]) {
-    thread.unshift(byId[cur]);
-    cur = byId[cur].parentId ?? null;
-  }
-  return thread;
 }
 
 export default function Home() {
@@ -128,26 +180,138 @@ export default function Home() {
   const [modelMenuVisible, setModelMenuVisible] = useState(false);
   const [promptsModalVisible, setPromptsModalVisible] = useState(false);
   const [authModalVisible, setAuthModalVisible] = useState(false);
-  const [authResetToken, setAuthResetToken] = useState<string | undefined>(undefined);
-  const [showConfirmedBanner, setShowConfirmedBanner] = useState(false);
-  const [showErrorBanner, setShowErrorBanner] = useState(false);
+  const [authResetToken, setAuthResetToken] = useState<AuthResetSession | undefined>(undefined);
+  const [authUpgradeMode, setAuthUpgradeMode] = useState(false);
+  const [authEmailUpgraded, setAuthEmailUpgraded] = useState(false);
+  const [popupQueue, setPopupQueue] = useState<PopupQueueItem[]>([]);
+  const [activePopup, setActivePopup] = useState<PopupQueueItem | null>(null);
+  const showConfirmedBanner = false;
+  const showEmailUpgradedBanner = false;
+  const showErrorBanner = false;
+  const showLevelUpNudge = false;
+  const [openLevelUpCodeRequest, setOpenLevelUpCodeRequest] = useState(0);
   const [earnHeartsVisible, setEarnHeartsVisible] = useState(false);
   const [xpOverviewVisible, setXpOverviewVisible] = useState(false);
   const [userMenuVisible, setUserMenuVisible] = useState(false);
+  const [onboardingVisible, setOnboardingVisible] = useState(false);
+  const [onboardingLoading, setOnboardingLoading] = useState(false);
+  const [onboardingError, setOnboardingError] = useState<string | null>(null);
+  const [rayaCardModalOpen, setRayaCardModalOpen] = useState(false);
+  const [loginRecoveryModalOpen, setLoginRecoveryModalOpen] = useState(false);
+  const [previewExpiresAt, setPreviewExpiresAt] = useState<number | null>(null);
+  const [previewStarted, setPreviewStarted] = useState(false);
+  const [promoModalOpen, setPromoModalOpen] = useState(false);
+  const turnstileSiteKey = process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY ?? "";
 
   // Auth + profile
-  const { user, loading: authLoading, signOut } = useAuth();
-  const { profile, updateProfile } = useUserProfile(user?.id);
+  const { user, dbUserId, loading: authLoading, signOut } = useAuth();
+  const cacheOwnerKey = user?.id ?? null;
+  const { profile, updateProfile, isProfileComplete } = useUserProfile(user?.id);
+  const { entitlements, setEntitlements, refresh: refreshEntitlements } = useUserEntitlements(user?.id);
+  const {
+    activeView,
+    setActiveView,
+    activeRoomId,
+    setActiveRoomId,
+    createRoomModalOpen,
+    setCreateRoomModalOpen,
+    joinRoomModalOpen,
+    setJoinRoomModalOpen,
+    inviteRoomModalOpen,
+    setInviteRoomModalOpen,
+    invitedGuestFlow,
+    invitedGuestAlias,
+    roomOnboardingNudgeVisible,
+    studyRooms,
+    selectedRoom,
+    selectedRoomTheme,
+    openInvitedGuestOnboarding,
+    registerInvitedGuestEngagement,
+    clearInvitedGuestFlow,
+    handleCreateRoom,
+    handleJoinRoom,
+    handleRemoveRoom,
+    roomError,
+    clearRoomError,
+  } = useStudyRooms({
+    authLoading,
+    isProfileComplete,
+    isSignedIn: !!user,
+    userId: user?.id ?? null,
+  });
   const [fileMenuAnchor, setFileMenuAnchor] = useState<HTMLButtonElement | null>(null);
   const [aiMenuAnchor, setAiMenuAnchor] = useState<HTMLButtonElement | null>(null);
+  const [modelMenuAnchor, setModelMenuAnchor] = useState<HTMLButtonElement | null>(null);
   const [learningHudVisible, setLearningHudVisible] = useState(false);
-  const [progressTab, setProgressTab] = useState<"overview" | "mission" | "skills">("overview");
+
   const [sharedBadgeId, setSharedBadgeId] = useState<string | null>(null);
   const [showScrollToBottom, setShowScrollToBottom] = useState(false);
+  const popupTimeoutRef = useRef<number | null>(null);
 
   // AI options state
   const [aiMode, setAiMode] = useState("normal");
-  const [selectedModel, setSelectedModel] = useState("gemini-3.1-flash-lite-preview");
+  const [selectedModel, setSelectedModel] = useState("gemini-3.1-flash-lite");
+
+  const enqueuePopup = useCallback((popup: PopupQueueItem) => {
+    setPopupQueue((current) => [...current, popup]);
+  }, []);
+
+  const closeActivePopup = useCallback(() => {
+    if (popupTimeoutRef.current !== null) {
+      window.clearTimeout(popupTimeoutRef.current);
+      popupTimeoutRef.current = null;
+    }
+    setActivePopup(null);
+  }, []);
+
+  const closeMobileSidebars = useCallback(() => {
+    if (typeof window === "undefined" || window.innerWidth >= 768) return;
+    setSidebarVisible(false);
+    setLearningHudVisible(false);
+  }, []);
+
+  const handleSidebarBackdropPress = useCallback((event: PointerEvent<HTMLElement>) => {
+    if (typeof window === "undefined" || window.innerWidth >= 768) return;
+    if (!sidebarVisible && !learningHudVisible) return;
+
+    const target = event.target as HTMLElement | null;
+    if (target?.closest("[data-sidebar-toggle], [data-sidebar-panel]")) return;
+
+    closeMobileSidebars();
+  }, [closeMobileSidebars, learningHudVisible, sidebarVisible]);
+
+  const handleToggleLeftSidebar = useCallback(() => {
+    if (typeof window !== "undefined" && window.innerWidth < 768) {
+      setLearningHudVisible(false);
+      setSidebarVisible((prev) => !prev);
+      return;
+    }
+
+    setSidebarVisible((prev) => !prev);
+  }, []);
+
+  const handleToggleRightSidebar = useCallback(() => {
+    if (typeof window !== "undefined" && window.innerWidth < 768) {
+      setSidebarVisible(false);
+      setLearningHudVisible((prev) => !prev);
+      return;
+    }
+
+    setLearningHudVisible((prev) => !prev);
+  }, []);
+
+  useEffect(() => {
+    setAiMode((current) => (
+      entitlements.availableModes.includes(current)
+        ? current
+        : getFirstUnlockedMode(entitlements, "normal")
+    ));
+    setSelectedModel((current) => (
+      entitlements.availableModels.includes(current)
+        ? current
+        : getFirstUnlockedModel(entitlements, "gemini-3.1-flash-lite")
+    ));
+  }, [entitlements.availableModels, entitlements.availableModes]);
 
   // Gamification (userId = auth.uid → triggers DB sync when logged in)
   const gamification = useGamification(user?.id);
@@ -161,6 +325,8 @@ export default function Home() {
   const sessionTurnCount = useRef(0);
   const pendingAnalysis = useRef<MessageAnalysis | null>(null);
   const sessionAggregatorRef = useRef<SessionAggregator | null>(null);
+  const previousCacheOwnerKeyRef = useRef<string | null>(null);
+  const abortControllerRef = useRef<AbortController | null>(null);
   // Conversation history for multi-turn memory (reset on new/switched conversation)
   const conversationHistoryRef = useRef<unknown[]>([]);
 
@@ -182,12 +348,26 @@ export default function Home() {
     sessionAggregatorRef.current = null;
   }, []);
 
+  const restoreCachedConversation = useCallback((requestedConversationId?: string | null) => {
+    const cached = readActiveConversationCache(cacheOwnerKey);
+    if (!cached) return false;
+    if (requestedConversationId && cached.conversationId !== requestedConversationId) return false;
+
+    const hydratedMessages = hydrateCachedMessages(cached.messages);
+    setAllMessages(hydratedMessages);
+    setActiveConversationId(cached.conversationId);
+    setActiveLeafId(cached.activeLeafId);
+    conversationHistoryRef.current = cached.history.slice(-MAX_CONVERSATION_HISTORY);
+    return hydratedMessages.length > 0;
+  }, [cacheOwnerKey]);
+
   const endConversation = useCallback(async (conversationId: string) => {
     const sessionSummary = buildSessionSummary();
     resetSessionAggregator();
 
     try {
       const authHeaders = await getAuthHeaders();
+      if (!hasAuthHeaders(authHeaders)) return;
       await fetch(`/api/conversations/${conversationId}/end`, {
         method: "POST",
         headers: sessionSummary
@@ -223,35 +403,275 @@ export default function Home() {
 
   // Load conversations when user logs in (or on first mount if already logged in)
   useEffect(() => {
-    if (!user) { setConversations([]); return; }
+    if (!user) {
+      setConversations([]);
+      setActiveConversationId(null);
+      setAllMessages([]);
+      setActiveLeafId(null);
+      conversationHistoryRef.current = [];
+      clearActiveConversationCache(cacheOwnerKey);
+      return;
+    }
+    
+    if (previousCacheOwnerKeyRef.current !== cacheOwnerKey) {
+      previousCacheOwnerKeyRef.current = cacheOwnerKey;
+      setConversations([]);
+      setActiveConversationId(null);
+      setAllMessages([]);
+      setActiveLeafId(null);
+      conversationHistoryRef.current = [];
+    }
+
+    // 1. Try to load this user's local cache first for immediate UI
+    const cachedList = readConversationsListCache(cacheOwnerKey);
+    if (cachedList && cachedList.length > 0) {
+      setConversations(cachedList);
+    }
+
     async function loadConversations() {
       try {
         const headers = await getAuthHeaders();
-        const res = await fetch("/api/conversations", { headers });
+        if (!hasAuthHeaders(headers)) {
+          // If we have cached conversations, we might still be authenticating
+          return;
+        }
+
+        // Add a controller to cancel if user logs out or component unmounts
+        const controller = new AbortController();
+        const res = await fetch("/api/conversations", { 
+          headers,
+          signal: controller.signal 
+        });
+        
+        if (res.status === 401) {
+          setConversations([]);
+          return;
+        }
         const { data } = await res.json();
         if (data) {
-          setConversations(
-            data.map((c: any) => ({
-              id: c.id,
-              title: c.title,
-              preview: c.preview || "",
-              date: new Date(c.updated_at || c.created_at),
-              isActive: false,
-            }))
-          );
+          const mapped = (data as ConversationRecord[]).map(mapConversationRecord);
+          
+          // Optimization: Only update state and cache if data has changed
+          setConversations((prev) => {
+            const hasChanged = JSON.stringify(prev) !== JSON.stringify(mapped);
+            if (hasChanged) {
+              writeConversationsListCache(mapped, cacheOwnerKey);
+              return mapped;
+            }
+            return prev;
+          });
         }
-      } catch (err) {
-        console.error("Failed to load conversations:", err);
+      } catch (err: any) {
+        if (err.name !== 'AbortError') {
+          console.error("Failed to load conversations:", err);
+        }
       }
     }
     loadConversations();
-  }, [user]);
+  }, [cacheOwnerKey, user]);
 
-  // ── Derived gamification values ─────────────────────────────────────────────
+  useEffect(() => {
+    const history = buildConversationHistoryFromLeaf(allMessages, activeLeafId).slice(-MAX_CONVERSATION_HISTORY);
+    conversationHistoryRef.current = history;
+
+    if (activeConversationId || allMessages.length > 0) {
+      writeActiveConversationCache({
+        ownerKey: cacheOwnerKey,
+        conversationId: activeConversationId,
+        activeLeafId,
+        history,
+        messages: allMessages,
+      });
+    }
+  }, [activeConversationId, activeLeafId, allMessages, cacheOwnerKey]);
+
+  useEffect(() => {
+    // Keep onboarding hidden while auth modals or bypass active
+    if (authLoading || authModalVisible || rayaCardModalOpen || loginRecoveryModalOpen) return;
+    
+    // Auto-start preview timer for invited guests who haven't started yet
+    if (invitedGuestFlow && !roomOnboardingNudgeVisible && !previewStarted) {
+      setPreviewExpiresAt(Date.now() + 300_000);
+      setPreviewStarted(true);
+    }
+
+    // Determine current bypass state dynamically
+    const isPreviewActive = previewExpiresAt !== null && Date.now() < previewExpiresAt;
+
+    if (isPreviewActive) {
+      setOnboardingVisible(false);
+      return;
+    }
+
+    if (!user || !isProfileComplete) {
+      setOnboardingVisible(true);
+      return;
+    }
+
+    setOnboardingVisible(false);
+    setOnboardingError(null);
+  }, [authLoading, authModalVisible, rayaCardModalOpen, loginRecoveryModalOpen, invitedGuestFlow, isProfileComplete, roomOnboardingNudgeVisible, user, previewExpiresAt, previewStarted]);
+
+  // Effect to re-evaluate bypass timer every second
+  useEffect(() => {
+    if (!previewExpiresAt) return;
+    const interval = setInterval(() => {
+      if (Date.now() > previewExpiresAt) {
+        setPreviewExpiresAt(null);
+      }
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [previewExpiresAt]);
+
+  useEffect(() => {
+    const settings = readAppSettings();
+    applyReduceMotion(settings.reduceMotion);
+
+    const syncSettings = () => {
+      const next = readAppSettings();
+      applyReduceMotion(next.reduceMotion);
+      if (!next.tipsEnabled && activePopup?.title === "Got a Level Up Code?") {
+        closeActivePopup();
+      }
+    };
+
+    window.addEventListener(APP_SETTINGS_EVENT, syncSettings);
+    return () => window.removeEventListener(APP_SETTINGS_EVENT, syncSettings);
+  }, [activePopup?.title, closeActivePopup]);
+
+  useEffect(() => {
+    if (activePopup || popupQueue.length === 0) return;
+    const [nextPopup, ...rest] = popupQueue;
+    setActivePopup(nextPopup);
+    setPopupQueue(rest);
+  }, [activePopup, popupQueue]);
+
+  useEffect(() => {
+    if (!activePopup?.durationMs) return;
+    popupTimeoutRef.current = window.setTimeout(() => {
+      setActivePopup(null);
+      popupTimeoutRef.current = null;
+    }, activePopup.durationMs);
+
+    return () => {
+      if (popupTimeoutRef.current !== null) {
+        window.clearTimeout(popupTimeoutRef.current);
+        popupTimeoutRef.current = null;
+      }
+    };
+  }, [activePopup]);
+
+  useEffect(() => {
+    if (!roomError) return;
+    const errorObj = typeof roomError === "string" ? { tone: "error" as const, title: "Error", message: roomError } : roomError;
+    enqueuePopup({
+      tone: errorObj.tone,
+      title: errorObj.title,
+      message: errorObj.message,
+      primaryAction: {
+        label: "Understood",
+        onClick: () => {
+          clearRoomError();
+          closeActivePopup();
+        },
+      },
+      durationMs: 8000,
+    });
+  }, [roomError, enqueuePopup, clearRoomError, closeActivePopup]);
+
+  useEffect(() => {
+    if (authLoading || !user || entitlements.levelUpActive) return;
+    const { tipsEnabled } = readAppSettings();
+    if (!tipsEnabled) return;
+    if (!canShowPopup("level_up_nudge", 36)) return;
+
+    const timer = window.setTimeout(() => {
+      markPopupSeen("level_up_nudge");
+      enqueuePopup({
+        tone: "warning",
+        title: "Got a Level Up Code?",
+        message: "Unlock extra context, one more AI mode, and your first premium discount from the profile menu.",
+        primaryAction: {
+          label: "Open menu",
+          onClick: () => {
+            setSidebarVisible(true);
+            setOpenLevelUpCodeRequest((value) => value + 1);
+            closeActivePopup();
+          },
+        },
+        secondaryAction: {
+          label: "Later",
+          onClick: closeActivePopup,
+        },
+        durationMs: 10000,
+      });
+    }, 4500);
+
+    return () => window.clearTimeout(timer);
+  }, [authLoading, closeActivePopup, enqueuePopup, entitlements.levelUpActive, user]);
+
+  useEffect(() => {
+    if (authLoading || !user || profile.hasVerifiedEmail || entitlements.historyWindowDays === null) return;
+    const { tipsEnabled } = readAppSettings();
+    if (!tipsEnabled) return;
+    if (!canShowPopup("history_window", 72)) return;
+
+    const timer = window.setTimeout(() => {
+      markPopupSeen("history_window");
+      enqueuePopup({
+        tone: "info",
+        title: `${entitlements.historyWindowDays}-day visible history`,
+        message: "Your full data is still kept safely, but instant accounts can only reopen the last 30 days until the email is verified.",
+        primaryAction: {
+          label: "Verify email",
+          onClick: () => {
+            setAuthUpgradeMode(true);
+            setAuthEmailUpgraded(false);
+            setAuthModalVisible(true);
+            closeActivePopup();
+          },
+        },
+        secondaryAction: {
+          label: "Later",
+          onClick: closeActivePopup,
+        },
+        durationMs: 12000,
+      });
+    }, 6500);
+
+    return () => window.clearTimeout(timer);
+  }, [
+    authLoading,
+    closeActivePopup,
+    enqueuePopup,
+    entitlements.historyWindowDays,
+    profile.hasVerifiedEmail,
+    user,
+  ]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("error") === "room_expired") {
+      enqueuePopup({
+        tone: "warning",
+        title: "Room Expired or Invalid",
+        message: "The study room link you followed is no longer active or the room has been closed.",
+        primaryAction: {
+          label: "Dismiss",
+          onClick: closeActivePopup,
+        },
+        durationMs: 8000,
+      });
+      // Clear the param
+      window.history.replaceState(null, "", "/");
+    }
+  }, [enqueuePopup, closeActivePopup]);
 
   const { state: g, hasUnsavedProgress } = gamification;
   const REGEN_CAP_DISPLAY = 5;
   const netMessages = getNetMessages(g.hearts, g.halfHeartOwed ?? false);
+  const messageLimitActive = false;
   const heartPolicyLabel = "10 messages · 24/7";
 
 
@@ -278,6 +698,93 @@ export default function Home() {
     setAttachedFiles((prev) => [...prev, file]);
   };
 
+  const handleCompleteOnboarding = useCallback(async ({
+    username,
+    displayName,
+    schoolLevel,
+    captchaToken,
+  }: {
+    username: string;
+    displayName: string;
+    schoolLevel: string;
+    captchaToken?: string;
+  }) => {
+    setOnboardingLoading(true);
+    setOnboardingError(null);
+
+    try {
+      let activeUser = user;
+
+      if (!activeUser) {
+        const { data, error } = await supabase.auth.signInAnonymously({
+          options: {
+            captchaToken,
+            data: {
+              display_name: displayName || username,
+              school_level: schoolLevel,
+              installation_id: getOrCreateInstallationId(),
+            },
+          },
+        });
+        if (error) throw error;
+        activeUser = data.user;
+      }
+
+      if (!activeUser) {
+        throw new Error("Could not initialize your session.");
+      }
+
+      const { data, error } = await supabase.rpc("complete_user_onboarding", {
+        p_username: username,
+        p_display_name: displayName,
+        p_school_level: schoolLevel,
+      });
+      if (error) throw error;
+
+      updateProfile({
+        username,
+        displayName: displayName || username,
+        schoolLevel,
+        hasEmail: Boolean((data as { hasEmail?: boolean } | null)?.hasEmail ?? profile.hasEmail),
+        hasVerifiedEmail: Boolean(
+          (data as { hasVerifiedEmail?: boolean } | null)?.hasVerifiedEmail ?? profile.hasVerifiedEmail
+        ),
+        authMethod:
+          ((data as { authMethod?: UserProfile["authMethod"] } | null)?.authMethod ?? profile.authMethod),
+        accountState:
+          ((data as { accountState?: UserProfile["accountState"] } | null)?.accountState ?? profile.accountState),
+        planTier:
+          ((data as { planTier?: string } | null)?.planTier ?? profile.planTier),
+        onboardingCompleted: Boolean(
+          (data as { onboardingCompleted?: boolean } | null)?.onboardingCompleted ?? profile.onboardingCompleted
+        ),
+      });
+      void refreshEntitlements();
+      clearInvitedGuestFlow();
+      setOnboardingVisible(false);
+    } catch (error: any) {
+      console.error("[Onboarding] Error:", error);
+      const message = String(error?.message || "Could not save your profile.");
+      if (message.toLowerCase().includes("anonymous sign-ins are disabled")) {
+        setOnboardingError("Anonymous access is not enabled yet in Supabase.");
+      } else {
+        setOnboardingError(message);
+      }
+    } finally {
+      setOnboardingLoading(false);
+    }
+  }, [
+    profile.accountState,
+    profile.authMethod,
+    profile.hasEmail,
+    profile.hasVerifiedEmail,
+    profile.onboardingCompleted,
+    profile.planTier,
+    refreshEntitlements,
+    updateProfile,
+    user,
+  ]);
+
   const handleRemoveFile = (fileId: string) => {
     setAttachedFiles((prev) => prev.filter((f) => f.id !== fileId));
   };
@@ -287,6 +794,14 @@ export default function Home() {
       setIsTyping(true);
       const messageForAi = aiText ?? userMessage.text;
 
+      let finalMessageForAi = messageForAi;
+      if (userMessage.files && userMessage.files.length > 0) {
+        const fileUrls = userMessage.files.map((f) => f.url).filter(Boolean);
+        if (fileUrls.length > 0) {
+          finalMessageForAi += `\n\n[Attached file URLs: ${fileUrls.join(", ")}]`;
+        }
+      }
+
       try {
         // Create a new conversation if none is active
         let convId = activeConversationId;
@@ -294,61 +809,85 @@ export default function Home() {
           const authHeaders = await getAuthHeaders();
           // Skip conversation creation if not authenticated (chat runs in-memory, convId stays null)
           if (Object.keys(authHeaders).length > 0) {
-          const res = await fetch("/api/conversations", {
-            method: "POST",
-            headers: { "Content-Type": "application/json", ...authHeaders },
-            body: JSON.stringify({
-              title: userMessage.text.substring(0, 50),
-            }),
-          });
-          if (res.ok) {
-            const { data } = await res.json();
-            if (data?.id) {
-              convId = data.id;
-              setActiveConversationId(convId);
-              setConversations((prev) => [
-                {
-                  id: data.id,
-                  title: data.title,
-                  preview: "",
-                  date: new Date(data.created_at),
-                  isActive: true,
-                },
-                ...prev.map((c) => ({ ...c, isActive: false })),
-              ]);
+            const res = await fetch("/api/conversations", {
+              method: "POST",
+              headers: { "Content-Type": "application/json", ...authHeaders },
+              body: JSON.stringify({
+                title: userMessage.text.substring(0, 50),
+              }),
+            });
+            if (res.ok) {
+              const { data } = await res.json();
+              if (data?.id) {
+                convId = data.id;
+                setActiveConversationId(convId);
+                setConversations((prev) => [
+                  {
+                    id: data.id,
+                    title: data.title,
+                    preview: "",
+                    date: new Date(data.created_at),
+                    isActive: true,
+                  },
+                  ...prev.map((c) => ({ ...c, isActive: false })),
+                ]);
+              }
             }
-          }
           } // end if (authHeaders)
         }
 
         // Call streaming API
         const authHeaders = await getAuthHeaders();
-        const res = await fetch("/api/raya/stream", {
-          method: "POST",
-          headers: { "Content-Type": "application/json", ...authHeaders },
-          body: JSON.stringify({
-            message: messageForAi,
-            clientMessageId: userMessage.id,
-            conversationId: convId,
-            aiMode,
-            model: selectedModel,
-            userTier: "free",
-            studentContext: buildStudentContext(gamification.state, profile),
-            conversationHistory: conversationHistoryRef.current,
-            parentId: userMessage.parentId,
-            files: userMessage.files?.map((f) => ({
-              name: f.name,
-              type: f.type,
-              mimeType: f.mimeType,
-              base64: f.base64,
-            })),
-          }),
-        });
+        const controller = new AbortController();
+        abortControllerRef.current = controller;
+
+          const timeoutId = window.setTimeout(() => {
+          if (abortControllerRef.current === controller) {
+            controller.abort();
+            console.warn("[RAYA] Request timed out after", STREAM_REQUEST_TIMEOUT_MS, "ms");
+          }
+        }, STREAM_REQUEST_TIMEOUT_MS);
+
+        let res: Response;
+        try {
+          res = await fetch("/api/raya/stream", {
+            method: "POST",
+            headers: { "Content-Type": "application/json", ...authHeaders },
+            body: JSON.stringify({
+              message: finalMessageForAi,
+              clientMessageId: userMessage.id,
+              conversationId: convId,
+              aiMode,
+              model: selectedModel,
+              userTier: entitlements.hasPremiumAccess ? "premium" : "free",
+              studentContext: buildStudentContext(gamification.state, profile),
+              conversationHistory: conversationHistoryRef.current.slice(-MAX_CONVERSATION_HISTORY),
+              parentId: userMessage.parentId,
+              files: userMessage.files?.map((f) => ({
+                name: f.name,
+                type: f.type,
+                mimeType: f.mimeType,
+                base64: f.base64,
+                url: f.url,
+              })),
+            }),
+            signal: controller.signal,
+          });
+        } finally {
+          window.clearTimeout(timeoutId);
+        }
 
         if (!res.ok) {
           const errText = await res.text();
-          console.error(`Stream request failed with status ${res.status}:`, errText);
-          throw new Error(`Stream request failed: ${res.status} - ${errText}`);
+          let errorMessage = errText;
+          try {
+            const parsed = JSON.parse(errText) as { error?: string; message?: string };
+            errorMessage = parsed.error || parsed.message || errText;
+          } catch {
+            // keep raw text
+          }
+          console.error(`Stream request failed with status ${res.status}:`, errorMessage);
+          throw new Error(errorMessage || `Stream request failed: ${res.status}`);
         }
 
         const reader = res.body!.getReader();
@@ -381,7 +920,7 @@ export default function Home() {
             prev.map((m) =>
               m.id === finalAssistantMessageId // Might be updated to DB ID
                 ? { ...m, text: assistantText }
-              : m
+                : m
             )
           );
         };
@@ -429,7 +968,7 @@ export default function Home() {
                 const typedInsight = insight && typeof insight === "object" ? insight as Partial<RayaInsight> : null;
                 getSessionAggregator().addExchange(
                   exchangeResult.analyticsPoint,
-                  messageForAi,
+                  finalMessageForAi,
                   typedInsight?.concept_id,
                   typedInsight?.student_verdict === "correct"
                 );
@@ -460,23 +999,29 @@ export default function Home() {
           }
         };
 
-        while (true) {
-          const { done, value } = await reader.read();
-          if (value) {
-            buffer += decoder.decode(value, { stream: !done });
+        try {
+          while (true) {
+            const { done, value } = await reader.read();
+            if (value) {
+              buffer += decoder.decode(value, { stream: !done });
 
-            // Parse SSE lines from buffer
-            const lines = buffer.split("\n");
-            buffer = lines.pop() || "";
-            for (const line of lines) handleSseLine(line);
+              const lines = buffer.split("\n");
+              buffer = lines.pop() || "";
+              for (const line of lines) handleSseLine(line);
+            }
+
+            if (done) break;
           }
 
-          if (done) break;
-        }
-        // Flush any trailing decoder bytes and leftover line.
-        buffer += decoder.decode();
-        if (buffer.trim().length > 0) {
-          handleSseLine(buffer);
+          buffer += decoder.decode();
+          if (buffer.trim().length > 0) {
+            handleSseLine(buffer);
+          }
+        } finally {
+          reader.releaseLock();
+          if (abortControllerRef.current === controller) {
+            abortControllerRef.current = null;
+          }
         }
 
         if (!streamHadError) {
@@ -513,6 +1058,9 @@ export default function Home() {
       } catch (err: any) {
         console.error("Send message error:", err);
         setIsTyping(false);
+        const errorText = err?.name === "AbortError"
+          ? "The assistant took too long to respond. Please retry."
+          : err?.message || "An error occurred. Please try again.";
         setAllMessages((prev) => {
           const newId = (Date.now() + 1).toString();
           setActiveLeafId(newId);
@@ -521,7 +1069,7 @@ export default function Home() {
             {
               id: newId,
               sender: "assistant" as const,
-              text: "An error occurred. Please try again.",
+              text: errorText,
               timestamp: new Date(),
               parentId: userMessage.id,
             },
@@ -529,22 +1077,60 @@ export default function Home() {
         });
       }
     },
-    [activeConversationId, aiMode, selectedModel, gamOnExchangeEvaluated, gamification.state, getSessionAggregator, profile]
+    [activeConversationId, aiMode, selectedModel, entitlements.hasPremiumAccess, gamOnExchangeEvaluated, gamification.state, getSessionAggregator, profile]
   );
 
-  const handleSend = () => {
-    if (isTyping) return;
-    if (input.trim() === "" && attachedFiles.length === 0) return;
-    if (netMessages <= 0) { setEarnHeartsVisible(true); return; }
+  const handleStopGeneration = useCallback(() => {
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+      abortControllerRef.current = null;
+      setIsTyping(false);
+      console.log("[RAYA] Generation interrupted by user.");
+    }
+  }, []);
 
+  const handleSend = async () => {
+    if (isTyping) return;
+    if (authLoading || !user || !isProfileComplete) {
+      setOnboardingVisible(true);
+      return;
+    }
+    if (input.trim() === "" && attachedFiles.length === 0) return;
+    if (messageLimitActive && netMessages <= 0) { setEarnHeartsVisible(true); return; }
+
+    setIsTyping(true); // Lock early so double-taps are prevented during upload
     const msgText = input.trim() || "(file sent)";
     const parentId = activeLeafId || undefined;
+
+    // Convert local base64 files into persistent Supabase Storage URLs to bypass Vercel 5MB limits
+    const processedFiles = [...attachedFiles];
+    if (processedFiles.length > 0) {
+      try {
+        await Promise.all(processedFiles.map(async (f) => {
+          if (f.base64 && !f.url?.startsWith('http')) {
+            const res = await fetch(`data:${f.mimeType};base64,${f.base64}`);
+            const blob = await res.blob();
+            const safeName = f.name.replace(/[^a-zA-Z0-9.-]/g, "_");
+            const fileName = `${user.id}/${Date.now()}-${safeName}`;
+            
+            const { data, error } = await supabase.storage.from('room_assets').upload(fileName, blob);
+            if (!error && data) {
+              const { data: publicData } = supabase.storage.from('room_assets').getPublicUrl(fileName);
+              f.url = publicData.publicUrl;
+              f.base64 = undefined; // Drop base64 from memory to ensure it isn't sent in the JSON payload
+            }
+          }
+        }));
+      } catch (err) {
+        console.error("[RAYA] Pre-upload failed:", err);
+      }
+    }
 
     const userMessage: Message = {
       id: Date.now().toString(),
       sender: "user",
       text: msgText,
-      files: attachedFiles.length > 0 ? [...attachedFiles] : undefined,
+      files: processedFiles.length > 0 ? processedFiles : undefined,
       timestamp: new Date(),
       parentId,
     };
@@ -558,9 +1144,9 @@ export default function Home() {
     pendingAnalysis.current = analyzeUserMessage(msgText);
     sessionTurnCount.current += 1;
 
-    // Gamification: consume heart + streak/session tracking
-    gamification.consumeHeart();
-    gamification.onMessageSent(msgText);
+    // Gamification
+    if (messageLimitActive) gamification.consumeHeart();
+    gamification.onMessageSent();
 
     sendMessage(userMessage);
   };
@@ -574,47 +1160,60 @@ export default function Home() {
     conversationHistoryRef.current = [];
     setActiveConversationId(id);
     setActiveLeafId(null);
+    setAllMessages([]);
     setConversations((prev) =>
       prev.map((c) => ({ ...c, isActive: c.id === id }))
     );
 
     try {
       const headers = await getAuthHeaders();
+      if (!hasAuthHeaders(headers)) {
+        console.warn("No auth session available to load conversation history.");
+        setActiveConversationId(null);
+        return;
+      }
+
+      // Check if this conversation's messages are already in cache
+      const cached = readActiveConversationCache(cacheOwnerKey);
+      if (cached && cached.conversationId === id && cached.messages.length > 0) {
+        const hydratedMessages = hydrateCachedMessages(cached.messages);
+        setAllMessages(hydratedMessages);
+        setActiveLeafId(cached.activeLeafId);
+        conversationHistoryRef.current = cached.history.slice(-MAX_CONVERSATION_HISTORY);
+        // We still fetch fresh data but the UI is already responsive
+      }
+
       const res = await fetch(`/api/conversations/${id}`, { headers });
+      if (res.status === 401 || res.status === 403 || res.status === 404) {
+        clearActiveConversationCache(cacheOwnerKey);
+        setAllMessages([]);
+        setActiveLeafId(null);
+        setActiveConversationId(null);
+        setConversations((prev) => prev.filter((conversation) => conversation.id !== id));
+        return;
+      }
+      if (!res.ok) {
+        throw new Error(`Conversation history request failed (${res.status})`);
+      }
       const { data } = await res.json();
       if (data) {
-        setAllMessages(
-          data.map((m: any) => ({
-            id: m.id,
-            sender: m.sender,
-            text: m.text,
-            timestamp: new Date(m.timestamp),
-            parentId: m.parent_id || undefined,
-          }))
-        );
-        // Find the most recent message to be the active leaf
-        if (data.length > 0) {
-          const lastIndex = data.length - 1;
-          setActiveLeafId(data[lastIndex].id);
-        } else {
-          setActiveLeafId(null);
-        }
-        
-        // Rebuild multi-turn history for the active branch only
-        // Delay this slightly because activeMessages takes a render cycle to update
-        setTimeout(() => {
-           const msgMap = new Map<string, any>(data.map((m:any) => [m.id, m]));
-           const thread: any[] = [];
-           let currentId: string | null = data.length > 0 ? data[data.length - 1].id : null;
-           while (currentId && msgMap.has(currentId)) {
-              const m: any = msgMap.get(currentId);
-              if (m.sender === "user" || m.sender === "assistant") {
-                thread.unshift({ role: m.sender as "user" | "assistant", content: m.text as string });
-              }
-              currentId = m.parent_id ?? null;
-           }
-           conversationHistoryRef.current = thread;
-        }, 0);
+        const messageRecords = data as MessageRecord[];
+        const mappedMessages = messageRecords.map(mapMessageRecord);
+        const latestLeaf = getLatestLeafId(messageRecords);
+        const history = buildConversationHistoryFromRecords(messageRecords).slice(-MAX_CONVERSATION_HISTORY);
+
+        setAllMessages(mappedMessages);
+        setActiveLeafId(latestLeaf);
+        conversationHistoryRef.current = history;
+
+        // Update cache
+        writeActiveConversationCache({
+          ownerKey: cacheOwnerKey,
+          conversationId: id,
+          activeLeafId: latestLeaf,
+          history,
+          messages: mappedMessages,
+        });
       }
     } catch (err) {
       console.error("Failed to load messages:", err);
@@ -622,40 +1221,49 @@ export default function Home() {
   };
 
   const handleDeleteConversation = async (id: string) => {
+    setConversations((prev) => prev.filter((c) => c.id !== id));
+    if (activeConversationId === id) {
+      resetSessionAggregator();
+      setActiveConversationId(null);
+      setAllMessages([]);
+      setActiveLeafId(null);
+      clearActiveConversationCache();
+    }
+    
     try {
       const headers = await getAuthHeaders();
+      if (!hasAuthHeaders(headers)) return;
       await fetch(`/api/conversations/${id}`, { method: "DELETE", headers });
-      setConversations((prev) => prev.filter((c) => c.id !== id));
-      if (activeConversationId === id) {
-        resetSessionAggregator();
-        setActiveConversationId(null);
-        setAllMessages([]);
-        setActiveLeafId(null);
-      }
     } catch (err) {
       console.error("Failed to delete conversation:", err);
     }
   };
 
-  const handleSuggestionPress = (prompt: string) => setInput(prompt);
+  const handleSuggestionPress = (prompt: string) => {
+    setInput(prompt);
+    gamification.onPromptUsed();
+  };
   const handleMorePrompts = () => setPromptsModalVisible(true);
   const handleSelectPrompt = (prompt: string) => setInput(prompt);
 
-  const handleVoicePress = () => {
-    setAllMessages((prev) => {
-      const newId = (Date.now() + 2).toString();
-      setActiveLeafId(newId);
-      return [
-      ...prev,
-      {
-        id: newId,
-        sender: "assistant",
-        text: "Voice mode is coming soon. For now, you can type your question or attach an image.",
-        timestamp: new Date(),
-        parentId: activeLeafId || undefined,
+  const handleVoicePress = useCallback(() => {
+    enqueuePopup({
+      tone: "info",
+      title: "Voice Is Not In The MVP",
+      message: "Voice input is not enabled yet. For now, type your question or attach an image/document so Raya can help immediately.",
+      primaryAction: {
+        label: "Attach a File",
+        onClick: () => {
+          setFileMenuVisible(true);
+          closeActivePopup();
+        },
       },
-    ]});
-  };
+      secondaryAction: {
+        label: "Keep Typing",
+        onClick: closeActivePopup,
+      },
+    });
+  }, [closeActivePopup, enqueuePopup]);
 
   const handleNewChat = async () => {
     if (activeConversationId) {
@@ -663,49 +1271,18 @@ export default function Home() {
     } else {
       resetSessionAggregator();
     }
-      conversationHistoryRef.current = [];
-      setActiveConversationId(null);
-      setAllMessages([]);
-      setActiveLeafId(null);
-      setInput("");
-      setAttachedFiles([]);
-      autoScrollRef.current = true;
-      setShowScrollToBottom(false);
-    };
-
-  const handleStartMissionInChat = (missionId: string) => {
-    if (isTyping) return;
-    if (netMessages <= 0) { setEarnHeartsVisible(true); return; }
-
-    const aiPrompt = gamification.startMission(missionId);
-    const mission = gamification.state.todaysMissions.find((m) => m.id === missionId);
-    const displayText = mission ? `▶ ${mission.title}` : "Starting mission...";
-
-    const userMessage: Message = {
-      id: Date.now().toString(),
-      sender: "user",
-      text: displayText,
-      timestamp: new Date(),
-      parentId: activeLeafId || undefined,
-    };
-
-    setAllMessages((prev) => [...prev, userMessage]);
-    setActiveLeafId(userMessage.id);
+    conversationHistoryRef.current = [];
+    setActiveConversationId(null);
+    setAllMessages([]);
+    setActiveLeafId(null);
     setInput("");
     setAttachedFiles([]);
-    setLearningHudVisible(false);
-
-    pendingAnalysis.current = analyzeUserMessage(aiPrompt);
-    sessionTurnCount.current += 1;
-    gamification.consumeHeart();
-    gamification.onMessageSent(aiPrompt);
-
-    sendMessage(userMessage, aiPrompt);
+    autoScrollRef.current = true;
+    setShowScrollToBottom(false);
+    clearActiveConversationCache(cacheOwnerKey);
   };
 
-  const handlePracticeSkill = (skillKey: string) => {
-    setInput(gamification.getPracticePrompt(skillKey));
-  };
+
 
   const handleShareBadge = async (badge: BadgeItem) => {
     const text = `I just unlocked the "${badge.label}" badge on RAYA! 🎓`;
@@ -725,14 +1302,17 @@ export default function Home() {
   const handleOpenMissionsFromEarnHearts = () => {
     setEarnHeartsVisible(false);
     setLearningHudVisible(true);
-    setProgressTab("mission");
   };
 
   const handleEditMessage = (messageId: string, newText: string) => {
     if (isTyping) return;
-    if (netMessages <= 0) { setEarnHeartsVisible(true); return; }
+    if (authLoading || !user || !isProfileComplete) {
+      setOnboardingVisible(true);
+      return;
+    }
+    if (messageLimitActive && netMessages <= 0) { setEarnHeartsVisible(true); return; }
 
-    const messageToEdit = allMessages.find(m => m.id === messageId);
+    const messageToEdit = findMessage(allMessages, messageId);
     if (!messageToEdit) return;
 
     // Create a new substituted message as a sibling (same parent_id)
@@ -750,44 +1330,28 @@ export default function Home() {
 
     // Completely rebuild conversationHistory up to this point
     // This removes the future of the old branch from the AI's context.
-    const thread: any[] = [];
-    let currentId: string | undefined = messageToEdit.parentId;
-    const msgMap = new Map(allMessages.map(m => [m.id, m]));
-    
-    while (currentId && msgMap.has(currentId)) {
-      const m = msgMap.get(currentId)!;
-      if (m.sender === "user" || m.sender === "assistant") {
-        thread.unshift({ role: m.sender as "user" | "assistant", content: m.text });
-      }
-      currentId = m.parentId;
-    }
-    conversationHistoryRef.current = thread;
+    conversationHistoryRef.current = buildConversationHistoryFromLeaf(
+      allMessages,
+      messageToEdit.parentId,
+    );
 
     // Analyse message before sending
     pendingAnalysis.current = analyzeUserMessage(newText);
     sessionTurnCount.current += 1;
 
     // Gamification
-    gamification.consumeHeart();
-    gamification.onMessageSent(newText);
+    if (messageLimitActive) gamification.consumeHeart();
+    gamification.onMessageSent();
 
     // Call the AI
     sendMessage(userMessage, newText);
   };
 
   const handleNavigateBranch = (messageId: string, direction: 'prev' | 'next') => {
-    const targetMessage = allMessages.find(m => m.id === messageId);
+    const targetMessage = findMessage(allMessages, messageId);
     if (!targetMessage) return;
 
-    // Find all siblings (messages sharing the same parentId)
-    const siblings = allMessages.filter(m => m.parentId === targetMessage.parentId);
-    // Sort siblings ascending by timestamp (or ID if timestamp is missing)
-    siblings.sort((a, b) => {
-      const timeA = a.timestamp?.getTime() || 0;
-      const timeB = b.timestamp?.getTime() || 0;
-      if (timeA !== timeB) return timeA - timeB;
-      return a.id.localeCompare(b.id);
-    });
+    const siblings = getSiblingMessages(allMessages, targetMessage);
 
     const currentIndex = siblings.findIndex(m => m.id === messageId);
     if (currentIndex === -1) return;
@@ -801,466 +1365,743 @@ export default function Home() {
       return; // Can't navigate
     }
 
-    // Now, we need to trace down the new branch to find its lowest leaf
-    // We want the most recent leaf that originates from targetSibling
-    const childrenMap = new Map<string, Message[]>();
-    for (const msg of allMessages) {
-      if (msg.parentId) {
-        if (!childrenMap.has(msg.parentId)) childrenMap.set(msg.parentId, []);
-        childrenMap.get(msg.parentId)!.push(msg);
-      }
-    }
-
-    let deepestLeafId = targetSibling.id;
-    let currentLevel = [targetSibling];
-    
-    // Simple BFS to find the furthest leaf in the sub-tree
-    while (currentLevel.length > 0) {
-      const nextLevel: Message[] = [];
-      for (const node of currentLevel) {
-        deepestLeafId = node.id; // Keep updating to latest encountered leaf
-        const kids = childrenMap.get(node.id);
-        if (kids) {
-          // Follow the most recent child (last one added)
-          kids.sort((a,b) => (b.timestamp?.getTime() || 0) - (a.timestamp?.getTime() || 0));
-          if(kids[0]) nextLevel.push(kids[0]);
-        }
-      }
-      currentLevel = nextLevel;
-    }
+    const deepestLeafId = findDeepestRecentLeaf(allMessages, targetSibling.id);
 
     // Update active view
     setActiveLeafId(deepestLeafId);
 
     // Rebuild context (in case they start chatting from there)
-    const thread2: any[] = [];
-    let currentId2: string | undefined = deepestLeafId;
-    const msgMap2 = new Map<string, Message>(allMessages.map(m => [m.id, m]));
-    
-    while (currentId2 && msgMap2.has(currentId2)) {
-      const m2: Message = msgMap2.get(currentId2)!;
-      if (m2.sender === "user" || m2.sender === "assistant") {
-        thread2.unshift({ role: m2.sender as "user" | "assistant", content: m2.text });
-      }
-      currentId2 = m2.parentId;
-    }
-    conversationHistoryRef.current = thread2;
+    conversationHistoryRef.current = buildConversationHistoryFromLeaf(allMessages, deepestLeafId);
   };
 
   const showHeader = activeMessages.length === 0;
   const peakLabel = heartPolicyLabel;
+  const sidebarUserName =
+    profile.displayName ||
+    user?.user_metadata?.display_name ||
+    user?.email?.split("@")[0] ||
+    "Student";
+  const sidebarUserEmail = profile.hasVerifiedEmail
+    ? (user?.email ?? "")
+    : `@${profile.username || "student"}`;
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("error") === "room_expired") {
+      enqueuePopup({
+        tone: "error",
+        title: "Room Expired",
+        message: "This study room session has ended.",
+        durationMs: 5000,
+      });
+      window.history.replaceState({}, "", window.location.pathname);
+    }
+  }, [enqueuePopup]);
+
+  const handleRoomFull = useCallback((room: StudyRoomPreview) => {
+    enqueuePopup({
+      tone: "info",
+      title: "Room is Full",
+      message: `"${room.title}" has reached its maximum capacity of 8 members. Try another room or create your own!`,
+      primaryAction: {
+        label: "I understand",
+        onClick: closeActivePopup,
+      },
+      durationMs: 6000,
+    });
+  }, [enqueuePopup, closeActivePopup]);
+
+  const menuDisplayName = profile.displayName || profile.username || "Student";
+  const menuUsername = profile.username ? `@${profile.username}` : "@student";
+  const menuContact = profile.hasVerifiedEmail ? (user?.email ?? menuUsername) : menuUsername;
+  const usageSummary = `${entitlements.tokenLimit === null ? "Unlimited" : `${Math.round(entitlements.tokenLimit / 1000)}k`} tokens · ${entitlements.fileUploadLimit === null ? "Unlimited" : entitlements.fileUploadLimit} file upload${entitlements.fileUploadLimit === 1 ? "" : "s"}`;
+  const usageDescription = entitlements.hasPremiumAccess
+    ? `Premium access is active with ${entitlements.roomMinutesLimit} minute rooms and an XP x${entitlements.xpMultiplier} booster.`
+    : entitlements.levelUpActive && profile.hasVerifiedEmail
+      ? `Verified Level Up accounts get stronger limits, Creative Mode, ${entitlements.roomMinutesLimit} minute rooms, and a light XP boost.`
+    : profile.hasVerifiedEmail
+      ? `Verified accounts get the full ${entitlements.tokenWindowHours}-hour study window with double the token budget.`
+      : `Instant accounts get a lighter ${entitlements.tokenWindowHours}-hour window until the email is verified.`;
+  const handleLockedModeSelect = useCallback((_: string, lockType: "level_up" | "premium") => {
+    if (lockType === "level_up") {
+      setPromoModalOpen(true);
+      return;
+    }
+    enqueuePopup({
+      tone: "info",
+      title: "Premium Mode Locked",
+      message: "This AI mode is reserved for Pro or Plus. The lock is real even if the full paywall is not live yet.",
+      primaryAction: {
+        label: "Use Available Modes",
+        onClick: closeActivePopup,
+      },
+    });
+  }, [closeActivePopup, enqueuePopup]);
+  const handleLockedModelSelect = useCallback(() => {
+    enqueuePopup({
+      tone: "info",
+      title: "Advanced Model Locked",
+      message: "Advanced models are reserved for Pro or Plus. You can keep studying with the currently unlocked models.",
+      primaryAction: {
+        label: "Use Current Model",
+        onClick: closeActivePopup,
+      },
+    });
+  }, [closeActivePopup, enqueuePopup]);
+  const isRoomView = activeView === "rooms";
+  const showSoloHeader = !isRoomView && showHeader;
+  const selectedRoomInviteUrl =
+    buildStudyRoomInviteUrl(
+      typeof window !== "undefined" ? window.location.origin : null,
+      selectedRoom.id,
+    );
+  const [roomMembersSnapshot, setRoomMembersSnapshot] = useState<Array<{
+    id: string;
+    name: string;
+    accent: string;
+    status: "explaining" | "thinking" | "ready";
+  }>>([]);
+  useEffect(() => {
+    setRoomMembersSnapshot([]);
+  }, [activeRoomId]);
+
+  const fallbackRoomMembers = [{
+    id: user?.id ?? 'me',
+    name: profile.displayName || profile.username || 'You',
+    accent: 'linear-gradient(135deg,#7c3aed,#ec4899)',
+    status: 'ready' as const,
+  }];
+  const realRoomMembers = roomMembersSnapshot.length > 0 ? roomMembersSnapshot : fallbackRoomMembers;
 
   // ── Render ──────────────────────────────────────────────────────────────────
 
+  const dismissLevelUpNudge = useCallback(() => {}, []);
+
   return (
     <>
-    {/* Auth redirect handler — reads URL params on mount, fires callbacks */}
-    <Suspense fallback={null}>
-      <AuthRedirectHandler
-        onConfirmed={() => {
-          setShowConfirmedBanner(true);
-          setTimeout(() => setShowConfirmedBanner(false), 4000);
-        }}
-        onResetPassword={(token) => {
-          setAuthResetToken(token);
-          setAuthModalVisible(true);
-        }}
-        onConfirmFailed={() => {
-          setShowErrorBanner(true);
-          setTimeout(() => setShowErrorBanner(false), 5000);
-        }}
-      />
-    </Suspense>
+      {/* Auth redirect handler — reads URL params on mount, fires callbacks */}
+      <Suspense fallback={null}>
+        <AuthRedirectHandler
+          onConfirmed={() => {
+            enqueuePopup({
+              tone: "success",
+              title: "Account confirmed",
+              message: "Welcome to RAYA. Your account is now verified and ready to go.",
+              durationMs: 4000,
+            });
+          }}
+          onEmailUpgraded={() => {
+            updateProfile({
+              hasEmail: true,
+              hasVerifiedEmail: true,
+              authMethod: "email",
+              accountState: "active_verified",
+            });
+            void refreshEntitlements();
+            setAuthUpgradeMode(false);
+            setAuthEmailUpgraded(true);
+            setAuthModalVisible(true);
+            enqueuePopup({
+              tone: "success",
+              title: "Email confirmed",
+              message: "Set your password to finish securing this account.",
+              durationMs: 4500,
+            });
+          }}
+          onResetPassword={(token) => {
+            setAuthResetToken(token);
+            setAuthModalVisible(true);
+          }}
+          onConfirmFailed={() => {
+            enqueuePopup({
+              tone: "error",
+              title: "Link expired",
+              message: "This confirmation link is no longer valid. Request a new one to continue.",
+              durationMs: 5000,
+            });
+          }}
+        />
+      </Suspense>
 
-    <div className="h-[100dvh] flex min-h-0 bg-transparent overflow-hidden">
-      <Sidebar
-        visible={sidebarVisible}
-        onClose={() => setSidebarVisible(false)}
-        userName={user?.user_metadata?.full_name ?? user?.email?.split("@")[0] ?? "Guest"}
-        userEmail={user?.email ?? ""}
-        onNewChat={handleNewChat}
-        conversations={conversations}
-        activeConversationId={activeConversationId}
-        onSelectConversation={handleSelectConversation}
-        onDeleteConversation={handleDeleteConversation}
-        onSignOut={signOut}
-        onOpenAuth={() => setAuthModalVisible(true)}
-      />
+      <div
+        className="fixed inset-0 md:static md:h-[100dvh] flex min-h-0 bg-transparent overflow-hidden selection:bg-indigo-100 selection:text-indigo-900"
+        onPointerDownCapture={handleSidebarBackdropPress}
+      >
+        <Sidebar
+          visible={sidebarVisible}
+          onClose={() => setSidebarVisible(false)}
+          userName={sidebarUserName}
+          userEmail={sidebarUserEmail}
+          userIsVerified={profile.hasVerifiedEmail}
+          entitlements={entitlements}
+          openLevelUpCodeRequest={openLevelUpCodeRequest}
+          onPromoApplied={(nextEntitlements: UserEntitlements) => {
+            setEntitlements(nextEntitlements);
+            void refreshEntitlements();
+          }}
+          onNewChat={() => {
+            setActiveView("chat");
+            handleNewChat();
+          }}
+          conversations={conversations}
+          rooms={studyRooms}
+          activeRoomId={activeRoomId}
+          activeConversationId={activeConversationId}
+          onSelectConversation={(id) => {
+            setActiveView("chat");
+            handleSelectConversation(id);
+          }}
+          onSelectRoom={(id) => {
+            setActiveView("rooms");
+            setActiveRoomId(id || null);
+          }}
+          onDeleteConversation={handleDeleteConversation}
+          onSignOut={signOut}
+          onOpenAuth={() => setAuthModalVisible(true)}
+          onUpgradeAccount={() => {
+            setAuthUpgradeMode(true);
+            setAuthEmailUpgraded(false);
+            setAuthModalVisible(true);
+          }}
+          onOpenPrompts={() => setPromptsModalVisible(true)}
+          activeView={activeView}
+          onSelectView={setActiveView}
+          onCreateRoom={() => setCreateRoomModalOpen(true)}
+          onJoinRoom={() => setJoinRoomModalOpen(true)}
+          onRoomFull={handleRoomFull}
+          onRemoveRoom={handleRemoveRoom}
+        />
 
-      {/* Main column */}
-      <div className="flex-1 min-w-0 min-h-0 flex flex-col bg-[linear-gradient(180deg,#f8fbff_0%,#f4f7fb_50%,#eef3f8_100%)]">
-
-        {/* Header */}
-        <header className="bg-white/90 border-b border-slate-200 backdrop-blur-sm">
-          <div className="flex items-center justify-between px-4 py-3 min-h-[60px]">
-            <button
-              onClick={() => setSidebarVisible((prev) => !prev)}
-              aria-label={sidebarVisible ? "Close sidebar" : "Open sidebar"}
-              className="w-9 h-9 rounded-full bg-slate-100 flex items-center justify-center hover:bg-slate-200 transition-colors"
-            >
-              <Menu className="w-5 h-5 text-gray-700" />
-            </button>
-
-            <div className="flex-1 flex items-center justify-center gap-2">
-              <img src="/raya-logo.jpeg" alt="RAYA" className="w-9 h-9 rounded-full object-cover" />
-              <div className="text-center">
-                <h1 className="text-lg font-bold text-gray-900"><NoTranslate>RAYA</NoTranslate></h1>
-                <p className="text-xs text-gray-500">AI Assistant</p>
+        {/* Main column */}
+        <div className="flex-1 min-w-0 min-h-0 flex flex-col bg-transparent">
+          {isRoomView && invitedGuestFlow && (
+            <div className="mx-auto mt-2 w-full max-w-[980px] px-3 sm:px-4 shrink-0">
+              <div
+                className={`rounded-[24px] border px-4 py-3 shadow-sm backdrop-blur-sm ${
+                  roomOnboardingNudgeVisible
+                    ? "border-amber-200 bg-[linear-gradient(135deg,#fff7ed_0%,#fffbeb_100%)]"
+                    : "border-sky-100 bg-[linear-gradient(135deg,#eff6ff_0%,#ffffff_100%)]"
+                }`}
+              >
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                  <div className="flex-1">
+                    <p className="text-[10px] font-black uppercase tracking-[0.22em] text-slate-400 hidden sm:block">
+                      {roomOnboardingNudgeVisible ? "Keep your place" : "Instant access active"}
+                    </p>
+                    <p className="mt-1 sm:mt-1 text-sm font-black text-slate-900">
+                      {roomOnboardingNudgeVisible
+                        ? `${invitedGuestAlias}, keep your place in the squad.`
+                        : `You're in as ${invitedGuestAlias}. Explore the room first.`}
+                    </p>
+                    <p className="mt-1 text-xs leading-relaxed text-slate-600 hidden sm:block">
+                      {roomOnboardingNudgeVisible
+                        ? "Choose your name and school level so this room can remember you next time."
+                        : "No signup wall right now. You can use the room freely, then claim your identity when you're ready."}
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      openInvitedGuestOnboarding();
+                      setOnboardingVisible(true);
+                    }}
+                    className={`rounded-full px-4 py-2 text-xs font-black uppercase tracking-wide transition-colors ${
+                      roomOnboardingNudgeVisible
+                        ? "bg-slate-900 text-white hover:bg-slate-800"
+                        : "bg-sky-600 text-white hover:bg-sky-700"
+                    }`}
+                  >
+                    {roomOnboardingNudgeVisible ? "Claim identity" : "Claim now"}
+                  </button>
+                </div>
               </div>
             </div>
-
-            <button
-              onClick={() => setLearningHudVisible((prev) => !prev)}
-              aria-label={learningHudVisible ? "Hide progress panel" : "Show progress panel"}
-              className="w-9 h-9 rounded-full bg-slate-100 flex items-center justify-center hover:bg-slate-200 transition-colors"
-            >
-              <ChevronRight
-                className={`w-5 h-5 text-gray-700 transition-transform ${
-                  learningHudVisible ? "rotate-180" : ""
-                }`}
-              />
-            </button>
-          </div>
-
-          {/* Sub header (visible only on empty state) */}
-          <AnimatePresence>
-            {showHeader && (
-              <motion.div
-                initial={{ opacity: 1, height: "auto" }}
-                exit={{ opacity: 0, height: 0 }}
-                className="px-4 pb-3 text-center overflow-hidden"
-              >
-                <p className="text-sm text-gray-900 font-medium mb-1 flex items-center justify-center gap-1.5">
-                  <Lightbulb className="w-4 h-4 text-amber-500" />
-                  Ask me anything about your lessons
-                </p>
-                <p className="text-xs text-gray-500 flex items-center justify-center gap-3">
-                  <span className="flex items-center gap-1">
-                    <Camera className="w-3.5 h-3.5" />
-                    Send images
-                  </span>
-                  <span className="flex items-center gap-1">
-                    <FileText className="w-3.5 h-3.5" />
-                    Share documents
-                  </span>
-                </p>
-              </motion.div>
-            )}
-          </AnimatePresence>
-        </header>
-
-        <div className="flex-1 min-h-0 relative flex flex-col overflow-hidden">
-          {/* Hearts display */}
-          <button
-            onClick={() => setEarnHeartsVisible(true)}
-            className="absolute top-3 left-4 z-20 flex items-center gap-1 px-2.5 py-1.5 rounded-full bg-white/80 border border-slate-200 shadow-sm hover:bg-white transition-colors"
-            aria-label={`${netMessages} messages remaining`}
-            title={regenCountdown ? `Next heart in ${regenCountdown}` : "Hearts — tap to earn more"}
-          >
-            <div className="flex items-center gap-0.5">
-              {Array.from({ length: REGEN_CAP_DISPLAY }).map((_, i) => {
-                const eff = Math.min(g.hearts - (g.halfHeartOwed ? 0.5 : 0), REGEN_CAP_DISPLAY);
-                const isFull = i < Math.floor(eff);
-                const isHalf = !isFull && i === Math.floor(eff) && eff % 1 === 0.5;
-                const pulse = netMessages === 0 ? "animate-pulse" : "";
-                if (isHalf) return (
-                  <span key={i} className={`relative inline-flex w-3.5 h-3.5 flex-shrink-0 ${pulse}`}>
-                    <Heart className="absolute w-3.5 h-3.5 text-slate-200 fill-slate-200" />
-                    <Heart className="absolute w-3.5 h-3.5 text-red-400 fill-red-400" style={{ clipPath: "inset(0 50% 0 0)" }} />
-                  </span>
-                );
-                return (
-                  <Heart key={i} className={`w-3.5 h-3.5 transition-colors ${isFull ? "text-red-400 fill-red-400" : "text-slate-200 fill-slate-200"} ${pulse}`} />
-                );
-              })}
-            </div>
-            <span className={`text-[11px] font-semibold ml-0.5 ${netMessages === 0 ? "text-red-500" : "text-slate-600"}`}>
-              {netMessages}
-            </span>
-          </button>
-
-          {!authLoading && !user && (
-            <button
-              onClick={() => setAuthModalVisible(true)}
-              className="absolute top-3 right-4 z-20 h-9 px-3 max-lg:w-9 max-lg:px-0 rounded-full text-xs font-semibold text-white bg-[linear-gradient(90deg,#2563eb_0%,#7c3aed_100%)] hover:opacity-90 active:scale-95 transition-all flex items-center justify-center gap-1.5"
-              aria-label="Sign up or log in"
-            >
-              <UserPlus className="w-3.5 h-3.5" />
-              <span className="max-lg:hidden">Sign up / Log in</span>
-            </button>
           )}
 
-          {!authLoading && user && (
-            <div className="absolute top-3 right-4 z-20 flex items-center gap-1.5">
-              <div className="relative">
+          {!isRoomView && (
+            <header className="glass-panel border-t-0 border-x-0 rounded-b-[2rem] mx-2 mt-2 relative md:sticky md:top-2 shrink-0 z-50">
+              <div className="flex items-center justify-between px-4 py-3 min-h-[60px]">
                 <button
-                  onClick={() => setUserMenuVisible((v) => !v)}
-                  className="w-9 h-9 rounded-full bg-[linear-gradient(135deg,#2563eb,#7c3aed)] flex items-center justify-center text-white text-sm font-bold hover:opacity-90 transition-opacity"
-                  aria-label="Account menu"
-                  title={user.email ?? ""}
+                  data-sidebar-toggle
+                  onClick={handleToggleLeftSidebar}
+                  aria-label={sidebarVisible ? "Close sidebar" : "Open sidebar"}
+                  className="w-9 h-9 rounded-full bg-slate-100 flex items-center justify-center hover:bg-slate-200 transition-colors"
                 >
-                  {(user.email?.[0] ?? "U").toUpperCase()}
+                  <Menu className="w-5 h-5 text-gray-700" />
                 </button>
 
-                <AnimatePresence>
-                  {userMenuVisible && (
-                    <>
-                      <motion.div
-                        initial={{ opacity: 0 }}
-                        animate={{ opacity: 1 }}
-                        exit={{ opacity: 0 }}
-                        className="fixed inset-0 z-30"
-                        onClick={() => setUserMenuVisible(false)}
-                      />
-                      <motion.div
-                        initial={{ opacity: 0, scale: 0.95, y: -4 }}
-                        animate={{ opacity: 1, scale: 1, y: 0 }}
-                        exit={{ opacity: 0, scale: 0.95, y: -4 }}
-                        transition={{ duration: 0.12 }}
-                        className="absolute right-0 top-11 z-40 w-52 rounded-2xl border border-slate-200 bg-white shadow-xl p-2"
-                      >
-                        <p className="px-2 py-1.5 text-[11px] text-slate-400 truncate">{user.email}</p>
-                        <hr className="my-1 border-slate-100" />
-                        <button
-                          onClick={async () => { setUserMenuVisible(false); await signOut(); }}
-                          className="w-full flex items-center gap-2 px-2 py-2 rounded-xl text-xs text-red-600 hover:bg-red-50 transition-colors"
-                        >
-                          <LogOut className="w-3.5 h-3.5" />
-                          Sign out
-                        </button>
-                      </motion.div>
-                    </>
-                  )}
-                </AnimatePresence>
+                <div className="flex-1 flex items-center justify-center gap-2">
+                  <Image src="/raya-logo.jpeg" alt="RAYA" width={36} height={36} className="rounded-full object-cover" />
+                  <div className="text-center">
+                    <h1 className="text-lg font-bold text-gray-900"><NoTranslate>RAYA</NoTranslate></h1>
+                    <p className="text-xs text-gray-500">AI Assistant</p>
+                  </div>
+                </div>
+
+                <button
+                  data-sidebar-toggle
+                  onClick={handleToggleRightSidebar}
+                  aria-label={learningHudVisible ? "Hide progress panel" : "Show progress panel"}
+                  className="w-9 h-9 rounded-full bg-slate-100 flex items-center justify-center hover:bg-slate-200 transition-colors"
+                >
+                  <ChevronRight
+                    className={`w-5 h-5 text-gray-700 transition-transform ${learningHudVisible ? "rotate-180" : ""}`}
+                  />
+                </button>
               </div>
-            </div>
+
+              <AnimatePresence>
+                {showSoloHeader && (
+                  <motion.div
+                    initial={{ opacity: 1, height: "auto" }}
+                    exit={{ opacity: 0, height: 0 }}
+                    className="px-4 pb-3 text-center overflow-hidden"
+                  >
+                    <p className="text-sm text-gray-900 font-medium mb-1 flex items-center justify-center gap-1.5">
+                      <Lightbulb className="w-4 h-4 text-amber-500" />
+                      Ask me anything about your lessons
+                    </p>
+                    <p className="text-xs text-gray-500 flex items-center justify-center gap-3">
+                      <span className="flex items-center gap-1">
+                        <Camera className="w-3.5 h-3.5" />
+                        Send images
+                      </span>
+                      <span className="flex items-center gap-1">
+                        <FileText className="w-3.5 h-3.5" />
+                        Share documents
+                      </span>
+                    </p>
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            </header>
           )}
 
-          {/* Chat area */}
-          <main
-            ref={chatScrollRef}
-            onScroll={handleChatScroll}
-            className="flex-1 min-h-0 overflow-y-auto overscroll-contain touch-pan-y"
-          >
-            {activeMessages.length === 0 ? (
-              <div className="mx-auto w-full max-w-[900px] px-3 sm:px-4 pt-14">
-                <EmptyState
-                  onSuggestionPress={handleSuggestionPress}
-                  onMorePromptsPress={handleMorePrompts}
-                />
-              </div>
-            ) : (
-              <div className="mx-auto w-full max-w-[900px] px-3 sm:px-4 pt-14 pb-4">
-                {activeMessages.map((message, idx) => {
-                  
-                  // Compute sibling info for this message
-                  const siblings = allMessages.filter(m => m.parentId === message.parentId);
-                  // Sort them nicely
-                  siblings.sort((a, b) => {
-                    const timeA = a.timestamp?.getTime() || 0;
-                    const timeB = b.timestamp?.getTime() || 0;
-                    if (timeA !== timeB) return timeA - timeB;
-                    return a.id.localeCompare(b.id);
-                  });
-
-                  const siblingCount = siblings.length;
-                  const siblingIndex = siblings.findIndex(m => m.id === message.id);
-
+          <div className="flex-1 min-h-0 relative flex flex-col overflow-hidden">
+            {/* Hearts display */}
+            {!isRoomView && messageLimitActive && <button
+              onClick={() => setEarnHeartsVisible(true)}
+              className="absolute top-3 left-4 z-20 flex items-center gap-1 px-2.5 py-1.5 rounded-full bg-white/80 border border-slate-200 shadow-sm hover:bg-white transition-colors"
+              aria-label={`${netMessages} messages remaining`}
+              title={regenCountdown ? `Next heart in ${regenCountdown}` : "Hearts — tap to earn more"}
+            >
+              <div className="flex items-center gap-0.5">
+                {Array.from({ length: REGEN_CAP_DISPLAY }).map((_, i) => {
+                  const eff = Math.min(g.hearts - (g.halfHeartOwed ? 0.5 : 0), REGEN_CAP_DISPLAY);
+                  const isFull = i < Math.floor(eff);
+                  const isHalf = !isFull && i === Math.floor(eff) && eff % 1 === 0.5;
+                  const pulse = netMessages === 0 ? "animate-pulse" : "";
+                  if (isHalf) return (
+                    <span key={i} className={`relative inline-flex w-3.5 h-3.5 flex-shrink-0 ${pulse}`}>
+                      <Heart className="absolute w-3.5 h-3.5 text-slate-200 fill-slate-200" />
+                      <Heart className="absolute w-3.5 h-3.5 text-red-400 fill-red-400" style={{ clipPath: "inset(0 50% 0 0)" }} />
+                    </span>
+                  );
                   return (
-                  <MessageBubble
-                    key={message.id}
-                    message={message}
-                    isStreaming={
-                      isTyping &&
-                      message.sender === "assistant" &&
-                      idx === activeMessages.length - 1
-                    }
-                    onEdit={handleEditMessage}
-                    siblingCount={siblingCount}
-                    siblingIndex={siblingIndex}
-                    onNavigateBranch={(direction) => handleNavigateBranch(message.id, direction)}
-                  />
+                    <Heart key={i} className={`w-3.5 h-3.5 transition-colors ${isFull ? "text-red-400 fill-red-400" : "text-slate-200 fill-slate-200"} ${pulse}`} />
                   );
                 })}
-                {isTyping && <TypingIndicator />}
-                <div ref={messagesEndRef} />
               </div>
-            )}
-          </main>
+              <span className={`text-[11px] font-semibold ml-0.5 ${netMessages === 0 ? "text-red-500" : "text-slate-600"}`}>
+                {netMessages}
+              </span>
+            </button>}
 
-          {showScrollToBottom && (
-            <button
-              type="button"
-              onClick={() => {
-                autoScrollRef.current = true;
-                setShowScrollToBottom(false);
-                scrollToBottom("smooth");
-              }}
-              aria-label="Scroll to latest message"
-              className="absolute bottom-4 right-4 z-30 w-10 h-10 rounded-full bg-primary text-white shadow-lg hover:bg-primary/90 transition-colors flex items-center justify-center"
-            >
-              <ChevronDown className="w-5 h-5" />
-            </button>
-          )}
-        </div>
-
-        {/* No-hearts banner */}
-        {netMessages === 0 && (
-          <div className="px-3 pb-1">
-            <div className="mx-auto w-full max-w-[900px]">
-              <div className="flex items-center gap-2 rounded-xl bg-red-50 border border-red-100 px-3 py-2">
-                <Heart className="w-4 h-4 text-red-400 fill-red-400 shrink-0 animate-pulse" />
-                <span className="text-xs text-red-600 flex-1">
-                  No hearts left!{regenCountdown ? <> Next heart in <NoTranslate>{regenCountdown}</NoTranslate>.</> : ""}
-                </span>
+            {/* Shared Profile/Auth Button - Positioned to match old Solo layout */}
+            <div className="absolute top-3.5 right-4 z-[60] flex items-center gap-2">
+              {!authLoading && !user && !onboardingVisible && (
                 <button
-                  onClick={() => setEarnHeartsVisible(true)}
-                  className="text-xs font-semibold text-red-600 underline hover:text-red-700 shrink-0"
+                  onClick={() => setAuthModalVisible(true)}
+                  className="h-9 px-3 rounded-full text-xs font-semibold text-white bg-[linear-gradient(90deg,#2563eb_0%,#7c3aed_100%)] hover:opacity-90 transition-all flex items-center justify-center gap-1.5"
                 >
-                  Earn more
+                  <UserPlus className="w-3.5 h-3.5" />
+                  <span>Sign up</span>
                 </button>
+              )}
+
+              {/* User Profil Menu Removed */}
+            </div>
+
+            {isRoomView ? (
+              activeRoomId ? (
+                <StudyRoomShell
+                  roomName={selectedRoom.title}
+                  mission={selectedRoom.mission}
+                  onlineCount={selectedRoom.onlineCount}
+                  maxMembers={selectedRoom.maxMembers ?? 8}
+                  durationMinutes={selectedRoom.duration ?? 0}
+                  timerEndsAt={selectedRoom.timerEndsAt ?? null}
+                  timerStatus={selectedRoom.timerStatus ?? "idle"}
+                  alert5mSent={selectedRoom.alert5mSent ?? false}
+                  alert2mSent={selectedRoom.alert2mSent ?? false}
+                  alertEndSent={selectedRoom.alertEndSent ?? false}
+                  squadXp={selectedRoomTheme.squadXp}
+                  members={realRoomMembers}
+                  events={[]}
+                  onInvite={() => setInviteRoomModalOpen(true)}
+                  onEngage={registerInvitedGuestEngagement}
+                  onToggleSidebar={handleToggleLeftSidebar}
+                  onTogglePanel={handleToggleRightSidebar}
+                  onReturnToLobby={() => {
+                    setActiveView("rooms");
+                    setActiveRoomId(null);
+                  }}
+                  panelOpen={learningHudVisible}
+                  files={selectedRoom.files}
+                  isCreator={false}
+                  roomAiMode={selectedRoom.aiMode ?? "active"}
+                  conversationId={selectedRoom.conversationId}
+                  roomId={selectedRoom.id}
+                  currentUserId={user?.id}
+                  currentDbUserId={dbUserId}
+                  onMembersSnapshotChange={setRoomMembersSnapshot}
+                  entitlements={entitlements}
+                />
+              ) : (
+                <StudyRoomsLobby
+                  rooms={studyRooms}
+                  onCreateRoom={() => setCreateRoomModalOpen(true)}
+                  onJoinRoom={() => setJoinRoomModalOpen(true)}
+                  onToggleSidebar={handleToggleLeftSidebar}
+                  onTogglePanel={handleToggleRightSidebar}
+                  panelOpen={learningHudVisible}
+                  onSelectRoom={(id) => {
+                    setActiveView("rooms");
+                    setActiveRoomId(id);
+                  }}
+                  onRoomFull={handleRoomFull}
+                  onRemoveRoom={handleRemoveRoom}
+                />
+              )
+            ) : (
+              <ChatWorkspace
+                chatScrollRef={chatScrollRef}
+                messagesEndRef={messagesEndRef}
+                activeMessages={activeMessages}
+                allMessages={allMessages}
+                isTyping={isTyping}
+                showScrollToBottom={showScrollToBottom}
+                fileMenuVisible={fileMenuVisible}
+                aiMenuVisible={aiMenuVisible}
+                modelMenuVisible={modelMenuVisible}
+                input={input}
+                attachedFiles={attachedFiles}
+                aiMode={aiMode}
+                selectedModel={selectedModel}
+                userIsVerified={profile.hasVerifiedEmail}
+                onChatScroll={handleChatScroll}
+                onScrollToBottom={() => {
+                  autoScrollRef.current = true;
+                  setShowScrollToBottom(false);
+                  scrollToBottom("smooth");
+                }}
+                onSuggestionPress={handleSuggestionPress}
+                onMorePromptsPress={handleMorePrompts}
+                onOpenRayaCard={() => setRayaCardModalOpen(true)}
+                onOpenPromo={() => setPromoModalOpen(true)}
+                onOpenVerify={() => {
+                  setAuthUpgradeMode(true);
+                  setAuthEmailUpgraded(false);
+                  setAuthModalVisible(true);
+                }}
+                onEditMessage={handleEditMessage}
+                onNavigateBranch={handleNavigateBranch}
+                onChangeText={setInput}
+                onSend={handleSend}
+                onFileButtonPress={() => setFileMenuVisible(true)}
+                onAIOptionsPress={() => setAiMenuVisible(true)}
+                onModelPress={() => setModelMenuVisible(true)}
+              onVoicePress={handleVoicePress}
+              onStopGeneration={handleStopGeneration}
+              onRemoveFile={handleRemoveFile}
+                onAnchorsChange={({ fileButton, aiButton, modelButton }) => {
+                  setFileMenuAnchor(fileButton);
+                  setAiMenuAnchor(aiButton);
+                  setModelMenuAnchor(modelButton);
+                }}
+              />
+            )}
+          </div>
+
+          {/* No-hearts banner */}
+          {!isRoomView && messageLimitActive && netMessages === 0 && (
+            <div className="px-3 pb-1">
+              <div className="mx-auto w-full max-w-[900px]">
+                <div className="flex items-center gap-2 rounded-[20px] bg-red-50/70 backdrop-blur-sm border border-red-100/50 px-4 py-3 shadow-sm">
+                  <Heart className="w-5 h-5 text-red-500 fill-red-400 shrink-0 animate-pulse" />
+                  <span className="text-sm text-red-700 font-medium flex-1 leading-tight">
+                    No hearts left!{regenCountdown ? <> Next heart in <NoTranslate>{regenCountdown}</NoTranslate>.</> : ""}
+                  </span>
+                  <button
+                    onClick={() => setEarnHeartsVisible(true)}
+                    className="text-sm font-bold text-red-600 underline underline-offset-4 hover:text-red-800 transition-colors shrink-0"
+                  >
+                    Earn more
+                  </button>
+                </div>
               </div>
             </div>
-          </div>
+          )}
+
+        </div>
+
+        {/* Right sidebar — progress panel */}
+        {isRoomView ? (
+          <StudyRoomSidebar
+            visible={learningHudVisible}
+            onClose={() => setLearningHudVisible(false)}
+            members={realRoomMembers.map(({ id, name, accent }) => ({
+              id,
+              name,
+              role: 'Member',
+              accent,
+              streak: 0,
+            }))}
+            roomId={activeRoomId ? selectedRoom.id : undefined}
+            roomName={activeRoomId ? selectedRoom.title : undefined}
+            mission={activeRoomId ? selectedRoom.mission : undefined}
+            timerStatus={activeRoomId ? (selectedRoom.timerStatus ?? "idle") : "idle"}
+            timerEndsAt={activeRoomId ? selectedRoom.timerEndsAt ?? null : null}
+            onlineCount={activeRoomId ? selectedRoom.onlineCount : undefined}
+            maxMembers={activeRoomId ? (selectedRoom.maxMembers ?? 8) : undefined}
+            roomAiMode={activeRoomId ? (selectedRoom.aiMode ?? "active") : undefined}
+            files={activeRoomId ? selectedRoom.files : undefined}
+          />
+        ) : (
+          <ProgressSidebar
+            visible={learningHudVisible}
+            onClose={() => setLearningHudVisible(false)}
+            g={g}
+            sharedBadgeId={sharedBadgeId}
+            onShareBadge={handleShareBadge}
+            onOpenXPOverview={() => setXpOverviewVisible(true)}
+            userIsVerified={profile.hasVerifiedEmail}
+            hasUnsavedProgress={hasUnsavedProgress}
+            onVerify={() => setAuthModalVisible(true)}
+            usageSummary={usageSummary}
+            usageDescription={usageDescription}
+            accountLabel={menuDisplayName}
+            accountHandle={menuContact}
+          />
         )}
 
-        {/* Chat input */}
-        <div className="px-2 sm:px-3 pb-3 pt-2 md:pb-2">
-          <div className="mx-auto w-full max-w-[900px] px-1 sm:px-2">
-            <ChatInput
-              value={input}
-              onChangeText={setInput}
-              onSend={handleSend}
-              onFileButtonPress={() => setFileMenuVisible(true)}
-              onAIOptionsPress={() => setAiMenuVisible(true)}
-              onVoicePress={handleVoicePress}
-              files={attachedFiles}
-              onRemoveFile={handleRemoveFile}
-              aiMode={aiMode}
-              onAnchorsChange={({ fileButton, aiButton }) => {
-                setFileMenuAnchor(fileButton);
-                setAiMenuAnchor(aiButton);
-              }}
-            />
-          </div>
-        </div>
+        {/* Menus */}
+        <FilePickerMenu
+          visible={fileMenuVisible}
+          onClose={() => setFileMenuVisible(false)}
+          onSelectFile={handleAddFile}
+          anchorEl={fileMenuAnchor}
+        />
+        <AIOptionsMenu
+          visible={aiMenuVisible}
+          onClose={() => setAiMenuVisible(false)}
+          currentMode={aiMode}
+          onModeChange={setAiMode}
+          currentModel={selectedModel}
+          onModelChange={setSelectedModel}
+          entitlements={entitlements}
+          anchorEl={aiMenuAnchor}
+          onOpenModelPicker={() => {
+            setAiMenuVisible(false);
+            setModelMenuVisible(true);
+          }}
+          onLockedModeSelect={handleLockedModeSelect}
+        />
+        <ModelPickerMenu
+          visible={modelMenuVisible}
+          onClose={() => setModelMenuVisible(false)}
+          currentModel={selectedModel}
+          onSelectModel={setSelectedModel}
+          entitlements={entitlements}
+          anchorEl={modelMenuAnchor}
+          onLockedModelSelect={handleLockedModelSelect}
+          changesRemaining={10} // Fallback or derived value
+        />
+        <PromptsModal
+          visible={promptsModalVisible}
+          onClose={() => setPromptsModalVisible(false)}
+          onSelectPrompt={handleSelectPrompt}
+        />
+        <OnboardingModal
+          visible={onboardingVisible}
+          defaultName={profile.displayName}
+          defaultUsername={profile.username}
+          defaultSchoolLevel={profile.schoolLevel}
+          loading={onboardingLoading}
+          error={onboardingError}
+          turnstileSiteKey={turnstileSiteKey}
+          onComplete={handleCompleteOnboarding}
+          onClose={() => {
+             // 300s bypass when closing onboarding
+             setPreviewExpiresAt(Date.now() + 300_000);
+             setPreviewStarted(true);
+             setOnboardingVisible(false);
+          }}
+          onOpenRecovery={() => {
+            setOnboardingVisible(false);
+            setLoginRecoveryModalOpen(true);
+          }}
+        />
+        <RayaCardModal 
+          isOpen={rayaCardModalOpen} 
+          onClose={() => setRayaCardModalOpen(false)} 
+          defaultTab="restore" 
+        />
+        <LoginRecoveryModal
+          isOpen={loginRecoveryModalOpen}
+          onClose={() => setLoginRecoveryModalOpen(false)}
+          onOpenEmailAuth={() => {
+            setAuthModalVisible(true);
+          }}
+        />
+        <PromoCodeModal
+          isOpen={promoModalOpen}
+          onClose={() => setPromoModalOpen(false)}
+          onApplied={(nextEntitlements: UserEntitlements) => {
+            setEntitlements(nextEntitlements);
+            void refreshEntitlements();
+          }}
+        />
+        <CreateRoomModal
+          isOpen={createRoomModalOpen}
+          onClose={() => setCreateRoomModalOpen(false)}
+          onCreate={handleCreateRoom}
+        />
+        <JoinRoomModal
+          isOpen={joinRoomModalOpen}
+          onClose={() => setJoinRoomModalOpen(false)}
+          onJoin={handleJoinRoom}
+        />
+        <InviteRoomModal
+          isOpen={inviteRoomModalOpen}
+          onClose={() => setInviteRoomModalOpen(false)}
+          roomName={selectedRoom.title}
+          inviteUrl={selectedRoomInviteUrl}
+          onlineCount={selectedRoom.onlineCount}
+        />
+
+        {/* Modals */}
+        <AuthModal
+          visible={authModalVisible}
+          onClose={() => {
+            setAuthModalVisible(false);
+            setAuthResetToken(undefined);
+            setAuthUpgradeMode(false);
+            setAuthEmailUpgraded(false);
+          }}
+          resetToken={authResetToken}
+          upgradeMode={authUpgradeMode}
+          emailUpgraded={authEmailUpgraded}
+        />
+        <XPOverviewModal
+          visible={xpOverviewVisible}
+          onClose={() => setXpOverviewVisible(false)}
+          g={g}
+        />
+        {messageLimitActive && (
+          <EarnHeartsModal
+            visible={earnHeartsVisible}
+            onClose={() => setEarnHeartsVisible(false)}
+            hearts={g.hearts}
+            netMessages={netMessages}
+            regenCountdown={regenCountdown}
+            peakLabel={peakLabel}
+            badges={g.badges}
+            onShareBadge={handleShareBadge}
+            onEarnHearts={gamification.earnHearts}
+            onOpenMissions={handleOpenMissionsFromEarnHearts}
+          />
+        )}
       </div>
 
-      {/* Right sidebar — progress panel */}
-      <ProgressSidebar
-        visible={learningHudVisible}
-        onClose={() => setLearningHudVisible(false)}
-        progressTab={progressTab}
-        onTabChange={setProgressTab}
-        g={g}
-        netMessages={netMessages}
-        regenCountdown={regenCountdown}
-        peakLabel={peakLabel}
-        sharedBadgeId={sharedBadgeId}
-        onStartMissionInChat={handleStartMissionInChat}
-        onPracticeSkill={handlePracticeSkill}
-        onShareBadge={handleShareBadge}
-        onOpenEarnHearts={() => setEarnHeartsVisible(true)}
-        onOpenXPOverview={() => setXpOverviewVisible(true)}
-        isLoggedIn={!!user}
-        hasUnsavedProgress={hasUnsavedProgress}
-        onSignUp={() => setAuthModalVisible(true)}
+      {/* Email confirmed banner */}
+      <AnimatePresence>
+        {showConfirmedBanner && (
+          <motion.div
+            initial={{ opacity: 0, y: 24 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: 24 }}
+            className="fixed bottom-6 left-1/2 -translate-x-1/2 z-[90] flex items-center gap-2.5 bg-emerald-500 text-white text-sm font-semibold px-5 py-3 rounded-2xl shadow-lg"
+          >
+            <span>✓</span>
+            <span>Account confirmed — welcome to RAYA!</span>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {showEmailUpgradedBanner && (
+          <motion.div
+            initial={{ opacity: 0, y: 24 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: 24 }}
+            className="fixed bottom-20 left-1/2 -translate-x-1/2 z-[90] flex items-center gap-2.5 bg-sky-500 text-white text-sm font-semibold px-5 py-3 rounded-2xl shadow-lg"
+          >
+            <span>✓</span>
+            <span>Email confirmed — set your password to finish.</span>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Confirmation failed banner */}
+      <AnimatePresence>
+        {showErrorBanner && (
+          <motion.div
+            initial={{ opacity: 0, y: 24 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: 24 }}
+            className="fixed bottom-6 left-1/2 -translate-x-1/2 z-[90] flex items-center gap-2.5 bg-red-500 text-white text-sm font-semibold px-5 py-3 rounded-2xl shadow-lg"
+          >
+            <span>✕</span>
+            <span>This link has expired. Please request a new one.</span>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {showLevelUpNudge && (
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: 20 }}
+            className="fixed bottom-6 right-6 z-[90] w-[calc(100vw-2rem)] max-w-xs rounded-2xl border border-amber-200 bg-white/95 p-4 shadow-lg backdrop-blur-sm"
+          >
+            <p className="text-sm font-semibold text-slate-900">Got a Level Up Code?</p>
+            <p className="mt-1 text-xs leading-relaxed text-slate-600">
+              Open your profile menu to unlock extra context, one more mode, and 50% off your first plan.
+            </p>
+            <div className="mt-3 flex items-center gap-2">
+              <button
+                onClick={() => {
+                  setSidebarVisible(true);
+                  setOpenLevelUpCodeRequest((value) => value + 1);
+                  dismissLevelUpNudge();
+                }}
+                className="h-9 rounded-xl bg-amber-500 px-3 text-xs font-semibold text-white hover:bg-amber-600 transition-colors"
+              >
+                Open menu
+              </button>
+              <button
+                onClick={dismissLevelUpNudge}
+                className="h-9 rounded-xl bg-slate-100 px-3 text-xs font-medium text-slate-600 hover:bg-slate-200 transition-colors"
+              >
+                Not now
+              </button>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      <SmartPopup
+        open={!!activePopup}
+        tone={activePopup?.tone ?? "info"}
+        title={activePopup?.title ?? ""}
+        message={activePopup?.message ?? ""}
+        primaryAction={activePopup?.primaryAction}
+        secondaryAction={activePopup?.secondaryAction}
+        onClose={closeActivePopup}
       />
 
-      {/* Menus */}
-      <FilePickerMenu
-        visible={fileMenuVisible}
-        onClose={() => setFileMenuVisible(false)}
-        onSelectFile={handleAddFile}
-        anchorEl={fileMenuAnchor}
-      />
-      <AIOptionsMenu
-        visible={aiMenuVisible}
-        onClose={() => setAiMenuVisible(false)}
-        currentMode={aiMode}
-        onModeChange={setAiMode}
-        currentModel={selectedModel}
-        onModelChange={setSelectedModel}
-        anchorEl={aiMenuAnchor}
-        onOpenModelPicker={() => {
-          setAiMenuVisible(false);
-          setModelMenuVisible(true);
-        }}
-      />
-      <ModelPickerMenu
-        visible={modelMenuVisible}
-        onClose={() => setModelMenuVisible(false)}
-        currentModel={selectedModel}
-        onSelectModel={setSelectedModel}
-      />
-      <PromptsModal
-        visible={promptsModalVisible}
-        onClose={() => setPromptsModalVisible(false)}
-        onSelectPrompt={handleSelectPrompt}
-      />
-
-      {/* Modals */}
-      {/* OnboardingModal désactivé — RAYA gère l'onboarding naturellement en conversation */}
-      <AuthModal
-        visible={authModalVisible}
-        onClose={() => { setAuthModalVisible(false); setAuthResetToken(undefined); }}
-        resetToken={authResetToken}
-      />
-      <XPOverviewModal
-        visible={xpOverviewVisible}
-        onClose={() => setXpOverviewVisible(false)}
-        g={g}
-      />
-      <EarnHeartsModal
-        visible={earnHeartsVisible}
-        onClose={() => setEarnHeartsVisible(false)}
-        hearts={g.hearts}
-        netMessages={netMessages}
-        regenCountdown={regenCountdown}
-        peakLabel={peakLabel}
-        badges={g.badges}
-        onShareBadge={handleShareBadge}
-        onEarnHearts={gamification.earnHearts}
-        onOpenMissions={handleOpenMissionsFromEarnHearts}
-      />
-
-    </div>
-
-    {/* Gamification toasts — rendered outside overflow-hidden root to avoid iOS clipping */}
-    <GamificationToast
-      notifications={gamification.pendingNotifications}
-      onDismiss={gamification.dismissNotification}
-    />
-
-    {/* Email confirmed banner */}
-    <AnimatePresence>
-      {showConfirmedBanner && (
-        <motion.div
-          initial={{ opacity: 0, y: 24 }}
-          animate={{ opacity: 1, y: 0 }}
-          exit={{ opacity: 0, y: 24 }}
-          className="fixed bottom-6 left-1/2 -translate-x-1/2 z-[90] flex items-center gap-2.5 bg-emerald-500 text-white text-sm font-semibold px-5 py-3 rounded-2xl shadow-lg"
-        >
-          <span>✓</span>
-          <span>Account confirmed — welcome to RAYA!</span>
-        </motion.div>
-      )}
-    </AnimatePresence>
-
-    {/* Confirmation failed banner */}
-    <AnimatePresence>
-      {showErrorBanner && (
-        <motion.div
-          initial={{ opacity: 0, y: 24 }}
-          animate={{ opacity: 1, y: 0 }}
-          exit={{ opacity: 0, y: 24 }}
-          className="fixed bottom-6 left-1/2 -translate-x-1/2 z-[90] flex items-center gap-2.5 bg-red-500 text-white text-sm font-semibold px-5 py-3 rounded-2xl shadow-lg"
-        >
-          <span>✕</span>
-          <span>This link has expired. Please request a new one.</span>
-        </motion.div>
-      )}
-    </AnimatePresence>
     </>
   );
 }

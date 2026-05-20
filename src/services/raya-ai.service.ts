@@ -33,6 +33,7 @@ export interface RayaConfig {
   topP?: number;
   reasoningEffort?: string; // For reasoning models (e.g. Groq gpt-oss): "low" | "medium" | "high"
   enableTools?: boolean; // Enable Gemini tools (urlContext, codeExecution, googleSearch)
+  systemPrompt?: string;
   systemPromptPath?: string;
   studentContext?: string; // Dynamic per-user context appended after the static prompt
 }
@@ -47,6 +48,7 @@ export interface FilePayload {
   type: 'image' | 'pdf' | 'document' | 'spreadsheet' | 'other';
   mimeType?: string;
   base64?: string;
+  url?: string;
 }
 
 type ExchangeType = 'test' | 'exercise' | 'discussion' | 'explanation' | 'social';
@@ -97,11 +99,18 @@ export interface ProgressionState {
 
 interface GeminiCacheEntry { name: string; model: string; expiresAt: number; }
 
-let _staticPromptText: string | null = null;
-let _geminiCache: GeminiCacheEntry | null = null;
+const _staticPromptText = new Map<string, string>();
+const _geminiCache = new Map<string, GeminiCacheEntry>();
 let _cachingDisabled = false;            // set after first 429 to skip all future attempts
 const CACHE_TTL_SECONDS = 3600;          // 1 h
 const CACHE_REFRESH_MS  = 5 * 60 * 1000; // refresh 5 min before expiry
+const PROMPT_CONTEXT_MARKERS = [
+  '## 14. LIVE STUDENT CONTEXT — INJECTED EACH SESSION',
+  '## 14. ROOM CONTEXT - INJECTED EACH SESSION',
+  '## 14. ROOM CONTEXT — INJECTED EACH SESSION',
+  '## 14. LIVE STUDENT CONTEXT',
+  '## 14. ROOM CONTEXT',
+];
 
 // ============================================================================
 // RAYA AI SERVICE - DUAL PROVIDER
@@ -111,13 +120,14 @@ export class RayaAIService {
   private provider: AIProvider;
   private geminiClient?: GoogleGenAI;
   private openaiClient?: OpenAI;
-  private config: Required<Omit<RayaConfig, 'provider' | 'baseURL' | 'thinkingBudget' | 'thinkingLevel' | 'topP' | 'reasoningEffort' | 'enableTools' | 'studentContext'>> & {
+  private config: Required<Omit<RayaConfig, 'provider' | 'baseURL' | 'thinkingBudget' | 'thinkingLevel' | 'topP' | 'reasoningEffort' | 'enableTools' | 'studentContext' | 'systemPrompt'>> & {
     baseURL?: string;
     thinkingBudget?: number;
     thinkingLevel?: string;
     topP?: number;
     reasoningEffort?: string;
     enableTools?: boolean;
+    systemPrompt?: string;
     studentContext?: string;
   };
   private systemPrompt: string;
@@ -129,7 +139,7 @@ export class RayaAIService {
     this.config = {
       apiKey: config.apiKey,
       baseURL: config.baseURL,
-      model: config.model || (this.provider === 'gemini' ? 'gemini-3.1-flash-lite-preview' : 'gpt-4o-mini'),
+      model: config.model || (this.provider === 'gemini' ? 'gemini-3.1-flash-lite' : 'gpt-4o-mini'),
       temperature: config.temperature || 0.75,
       maxTokens: config.maxTokens || 4096,
       thinkingBudget: config.thinkingBudget,
@@ -137,7 +147,8 @@ export class RayaAIService {
       topP: config.topP || 0.85,
       reasoningEffort: config.reasoningEffort,
       enableTools: config.enableTools ?? false,
-      systemPromptPath: config.systemPromptPath || path.join(process.cwd(), 'prompts/RAYA_v3.0_SYSTEM_PROMPT.md'),
+      systemPrompt: config.systemPrompt,
+      systemPromptPath: config.systemPromptPath || path.join(process.cwd(), 'prompts/RAYA_v3.0_SYSTEM_PROMPT.xml'),
     };
 
     // Initialize appropriate client
@@ -162,27 +173,34 @@ export class RayaAIService {
   private loadSystemPrompt(): string {
     let prompt: string;
 
-    // 1. Try Environment Variable (Production/Secure fallback)
-    if (process.env.RAYA_SYSTEM_PROMPT) {
+    // 1. Explicit prompt passed by caller (highest priority)
+    if (this.config.systemPrompt && !this.config.systemPrompt.includes('$(') && this.config.systemPrompt.length > 200) {
+      prompt = this.config.systemPrompt;
+    } else if (process.env.RAYA_SYSTEM_PROMPT && process.env.RAYA_SYSTEM_PROMPT.length > 200 && !process.env.RAYA_SYSTEM_PROMPT.includes('$(')) {
+      // 2. Try Environment Variable (Production/Secure fallback)
       prompt = process.env.RAYA_SYSTEM_PROMPT;
     } else {
-      // 2. Try Local File (Development/Configurable default)
+      // 3. Try Local File (Development/Configurable default)
       try {
         prompt = fs.readFileSync(this.config.systemPromptPath, 'utf-8');
       } catch (error) {
         console.warn('System prompt file not found at:', this.config.systemPromptPath);
-        throw new Error('System prompt not found in Environment (RAYA_SYSTEM_PROMPT) or File. Deploy will fail without it.');
+        // FINAL FALLBACK: Hardcoded core persona to prevent total failure
+        prompt = `You are RAYA, a brilliant female AI academic coach.
+Your goal is to help students learn by themselves using the Socratic method.
+Never solve problems directly. Guide them, probe their understanding, and teach only the missing gaps.
+Stay warm, encouraging, and direct. Use LaTeX for math ($...$).`;
       }
     }
 
     if (this.config.studentContext) {
       // Replace the placeholder section 14 with the real live context
-      const marker = '## 14. LIVE STUDENT CONTEXT — INJECTED EACH SESSION';
-      const idx = prompt.indexOf(marker);
-      if (idx !== -1) {
-        prompt = prompt.slice(0, idx) + this.config.studentContext;
+      const marker = PROMPT_CONTEXT_MARKERS.find((candidate) => prompt.includes(candidate));
+      if (marker) {
+        const markerIndex = prompt.indexOf(marker);
+        prompt = prompt.slice(0, markerIndex + marker.length) + '\n' + this.config.studentContext;
       } else {
-        prompt += '\n\n' + this.config.studentContext;
+        prompt += `\n\n[CONTEXT]\n${this.config.studentContext}`;
       }
     }
     return prompt;
@@ -192,19 +210,33 @@ export class RayaAIService {
   // CONTEXT CACHING — static prompt (§1–13) cached on Gemini servers
   // ==========================================================================
 
+  private getPromptCacheKey(): string {
+    if (this.config.systemPrompt) {
+      return `inline:${this.config.systemPrompt.length}:${this.config.systemPrompt.slice(0, 120)}`;
+    }
+    return `file:${this.config.systemPromptPath}`;
+  }
+
   /** Returns the static portion of the system prompt (everything before §14). */
   private loadStaticPrompt(): string {
-    if (_staticPromptText) return _staticPromptText;
+    const promptCacheKey = this.getPromptCacheKey();
+    const cachedPrompt = _staticPromptText.get(promptCacheKey);
+    if (cachedPrompt) return cachedPrompt;
     let raw: string;
-    try {
-      raw = fs.readFileSync(this.config.systemPromptPath, 'utf-8');
-    } catch {
-      throw new Error('System prompt file not found');
+    if (this.config.systemPrompt) {
+      raw = this.config.systemPrompt;
+    } else {
+      try {
+        raw = fs.readFileSync(this.config.systemPromptPath, 'utf-8');
+      } catch {
+        throw new Error('System prompt file not found');
+      }
     }
-    const marker = '## 14. LIVE STUDENT CONTEXT';
-    const idx = raw.indexOf(marker);
-    _staticPromptText = idx !== -1 ? raw.slice(0, idx).trimEnd() : raw;
-    return _staticPromptText;
+    const marker = PROMPT_CONTEXT_MARKERS.find((candidate) => raw.includes(candidate));
+    const idx = marker ? raw.indexOf(marker) : -1;
+    const staticPrompt = idx !== -1 ? raw.slice(0, idx).trimEnd() : raw;
+    _staticPromptText.set(promptCacheKey, staticPrompt);
+    return staticPrompt;
   }
 
   /**
@@ -219,12 +251,14 @@ export class RayaAIService {
     if (this.config.enableTools) return null;
 
     const now = Date.now();
+    const promptCacheKey = `${this.getPromptCacheKey()}:${this.config.model}`;
+    const existingCache = _geminiCache.get(promptCacheKey);
     if (
-      _geminiCache &&
-      _geminiCache.model === this.config.model &&
-      _geminiCache.expiresAt > now + CACHE_REFRESH_MS
+      existingCache &&
+      existingCache.model === this.config.model &&
+      existingCache.expiresAt > now + CACHE_REFRESH_MS
     ) {
-      return _geminiCache.name;
+      return existingCache.name;
     }
 
     try {
@@ -236,13 +270,13 @@ export class RayaAIService {
           ttl: `${CACHE_TTL_SECONDS}s`,
         },
       });
-      _geminiCache = {
+      _geminiCache.set(promptCacheKey, {
         name: cache.name as string,
         model: this.config.model,
         expiresAt: now + CACHE_TTL_SECONDS * 1000,
-      };
+      });
       console.log(`[RAYA] Gemini cache created: ${cache.name}`);
-      return _geminiCache.name;
+      return cache.name as string;
     } catch (err: any) {
       _cachingDisabled = true;
       console.warn('[RAYA] Context caching disabled (quota/unsupported), using inline prompt');
@@ -292,11 +326,26 @@ export class RayaAIService {
       content: userMessage,
     });
 
-    // Build config
-    const config = this.buildGeminiConfig({ systemInstruction: this.systemPrompt });
+    // Try context caching (static §1–13 cached on Gemini servers)
+    const cacheName = await this.tryGetOrCreateCache();
 
-    // Build contents
-    const contents = this.buildGeminiContents();
+    // Determine thinking level
+    const thinkingLevel = this.shouldEnableThinking(userMessage) ? this.config.thinkingLevel : 'NONE';
+
+    // Build config
+    const config = cacheName
+      ? this.buildGeminiConfig({ cachedContent: cacheName, thinkingLevel })
+      : this.buildGeminiConfig({ systemInstruction: this.systemPrompt, thinkingLevel });
+
+    // When using cache, inject §14 student context as the first exchange in contents
+    const historyContents = this.buildGeminiContents();
+    let contents = (cacheName && this.config.studentContext)
+      ? [
+          { role: 'user',  parts: [{ text: `[Session context]\n${this.config.studentContext}` }] },
+          { role: 'model', parts: [{ text: 'Compris.' }] },
+          ...historyContents,
+        ]
+      : historyContents;
 
     // Generate response
     const response = await this.geminiClient.models.generateContent({
@@ -391,10 +440,13 @@ export class RayaAIService {
     // Try context caching (static §1–13 cached on Gemini servers)
     const cacheName = await this.tryGetOrCreateCache();
 
+    // Determine thinking level
+    const thinkingLevel = this.shouldEnableThinking(userMessage) ? this.config.thinkingLevel : 'NONE';
+
     // Build config
     const config = cacheName
-      ? this.buildGeminiConfig({ cachedContent: cacheName })
-      : this.buildGeminiConfig({ systemInstruction: this.systemPrompt });
+      ? this.buildGeminiConfig({ cachedContent: cacheName, thinkingLevel })
+      : this.buildGeminiConfig({ systemInstruction: this.systemPrompt, thinkingLevel });
 
     // When using cache, inject §14 student context as the first exchange in contents
     // (it wasn't included in the cached static prompt)
@@ -409,11 +461,22 @@ export class RayaAIService {
 
     // Attach files to the last user message (inlineData)
     if (files && files.length > 0) {
-      const fileParts = files
-        .filter((f) => f.base64 && f.mimeType)
-        .map((f) => ({
-          inlineData: { data: f.base64!, mimeType: f.mimeType! },
-        }));
+      const fileParts = [];
+      for (const f of files) {
+        if (f.base64 && f.mimeType) {
+          fileParts.push({ inlineData: { data: f.base64, mimeType: f.mimeType } });
+        } else if (f.url && f.mimeType) {
+          try {
+            const res = await fetch(f.url);
+            const buf = await res.arrayBuffer();
+            const b64 = Buffer.from(buf).toString('base64');
+            fileParts.push({ inlineData: { data: b64, mimeType: f.mimeType } });
+          } catch (err) {
+            console.error('[RAYA] Failed to fetch remote file for Gemini context:', err);
+          }
+        }
+      }
+      
       if (fileParts.length > 0 && contents.length > 0) {
         const last = contents[contents.length - 1];
         contents = [
@@ -431,14 +494,54 @@ export class RayaAIService {
     });
 
     let fullText = '';
+    const INSIGHT_START = '---RAYA_INSIGHT---';
+    let insightDetected = false;
+    let preInsightBuffer = ''; // Buffer for potential start tag match
 
     // Stream chunks
     for await (const chunk of response) {
       const chunkText = chunk.text || '';
-      if (chunkText) {
-        fullText += chunkText;
-        yield chunkText;
+      if (!chunkText) continue;
+
+      fullText += chunkText;
+
+      if (insightDetected) {
+        // Once insight is detected, we stop yielding anything
+        continue;
       }
+
+      // Check if we are starting to see the insight tag
+      const combined = preInsightBuffer + chunkText;
+      const startIndex = combined.indexOf(INSIGHT_START);
+
+      if (startIndex !== -1) {
+        insightDetected = true;
+        // Yield the part before the insight tag
+        const beforeInsight = combined.slice(0, startIndex);
+        if (beforeInsight) {
+          yield beforeInsight;
+        }
+        preInsightBuffer = ''; // Clear buffer
+      } else {
+        // No full tag yet. We need to be careful not to yield 
+        // a partial tag at the end of the current stream.
+        // The tag is 18 chars long. Keep last 17 chars in buffer.
+        const keepLen = INSIGHT_START.length - 1;
+        if (combined.length > keepLen) {
+          const toYield = combined.slice(0, combined.length - keepLen);
+          preInsightBuffer = combined.slice(combined.length - keepLen);
+          if (toYield) {
+            yield toYield;
+          }
+        } else {
+          preInsightBuffer = combined;
+        }
+      }
+    }
+
+    // If we finished and never saw the insight, yield the remaining buffer
+    if (!insightDetected && preInsightBuffer) {
+      yield preInsightBuffer;
     }
 
     // Add response to history
@@ -465,12 +568,12 @@ export class RayaAIService {
     });
 
     // Build last user content — add images if present (OpenAI vision)
-    const imageFiles = files?.filter((f) => f.type === 'image' && f.base64 && f.mimeType) ?? [];
+    const imageFiles = files?.filter((f) => f.type === 'image' && (f.base64 || f.url) && f.mimeType) ?? [];
     const lastUserContent: OpenAI.Chat.ChatCompletionContentPart[] = [
       { type: 'text', text: userMessage },
       ...imageFiles.map((f) => ({
         type: 'image_url' as const,
-        image_url: { url: `data:${f.mimeType};base64,${f.base64}` },
+        image_url: { url: f.url ? f.url : `data:${f.mimeType};base64,${f.base64}` },
       })),
     ];
 
@@ -495,14 +598,47 @@ export class RayaAIService {
     });
 
     let fullText = '';
+    const INSIGHT_START = '---RAYA_INSIGHT---';
+    let insightDetected = false;
+    let preInsightBuffer = '';
 
     // Stream chunks
     for await (const chunk of stream) {
       const chunkText = chunk.choices[0]?.delta?.content || '';
-      if (chunkText) {
-        fullText += chunkText;
-        yield chunkText;
+      if (!chunkText) continue;
+
+      fullText += chunkText;
+
+      if (insightDetected) {
+        continue;
       }
+
+      const combined = preInsightBuffer + chunkText;
+      const startIndex = combined.indexOf(INSIGHT_START);
+
+      if (startIndex !== -1) {
+        insightDetected = true;
+        const beforeInsight = combined.slice(0, startIndex);
+        if (beforeInsight) {
+          yield beforeInsight;
+        }
+        preInsightBuffer = '';
+      } else {
+        const keepLen = INSIGHT_START.length - 1;
+        if (combined.length > keepLen) {
+          const toYield = combined.slice(0, combined.length - keepLen);
+          preInsightBuffer = combined.slice(combined.length - keepLen);
+          if (toYield) {
+            yield toYield;
+          }
+        } else {
+          preInsightBuffer = combined;
+        }
+      }
+    }
+
+    if (!insightDetected && preInsightBuffer) {
+      yield preInsightBuffer;
     }
 
     // Add response to history
@@ -537,12 +673,21 @@ export class RayaAIService {
       content: `[IMAGE] ${userMessage}`,
     });
 
+    // Try context caching
+    const cacheName = await this.tryGetOrCreateCache();
+
+    // Determine thinking level
+    const thinkingLevel = this.shouldEnableThinking(userMessage) ? this.config.thinkingLevel : 'NONE';
+
     // Build config
-    const config = this.buildGeminiConfig({ systemInstruction: this.systemPrompt });
+    const config = cacheName
+      ? this.buildGeminiConfig({ cachedContent: cacheName, thinkingLevel })
+      : this.buildGeminiConfig({ systemInstruction: this.systemPrompt, thinkingLevel });
 
     // Build contents with image
-    const contents = [
-      ...this.buildGeminiContents().slice(0, -1), // Exclude last message
+    const historyContents = this.buildGeminiContents();
+    let contents = [
+      ...historyContents.slice(0, -1), // Exclude last message
       {
         role: 'user',
         parts: [
@@ -556,6 +701,15 @@ export class RayaAIService {
         ],
       },
     ];
+
+    // Inject student context if using cache
+    if (cacheName && this.config.studentContext) {
+      contents = [
+        { role: 'user',  parts: [{ text: `[Session context]\n${this.config.studentContext}` }] },
+        { role: 'model', parts: [{ text: 'Compris.' }] },
+        ...contents,
+      ];
+    }
 
     const response = await this.geminiClient.models.generateContent({
       model: this.config.model,
@@ -732,19 +886,29 @@ export class RayaAIService {
       HIGH: ThinkingLevel.HIGH,
     };
     
-    // If thinkingLevel is NONE, we don't pass a thinkingConfig at all
-    const thinkingLevel = this.config.thinkingLevel
-      ? levelMap[this.config.thinkingLevel.toUpperCase()]
-      : ThinkingLevel.MEDIUM;
+    // Check if thinking is explicitly disabled or overridden in this call
+    const requestedLevel = (overrides.thinkingLevel as string) || this.config.thinkingLevel;
+    const isThinkingDisabled = requestedLevel?.toUpperCase() === 'NONE';
+
+    const thinkingLevel = !isThinkingDisabled && requestedLevel
+      ? levelMap[requestedLevel.toUpperCase()]
+      : ThinkingLevel.LOW;
       
     const cfg: Record<string, unknown> = {
       temperature: this.config.temperature,
       topP: this.config.topP,
+      maxOutputTokens: this.config.maxTokens || 4096, // Assurer un max tokens
       ...overrides,
     };
     
-    if (this.config.thinkingLevel?.toUpperCase() !== 'NONE' && thinkingLevel) {
-       cfg.thinkingConfig = { thinkingLevel };
+    // Remove thinkingLevel from overrides as it's not a valid Gemini config key
+    delete cfg.thinkingLevel;
+
+    if (!isThinkingDisabled && thinkingLevel) {
+       cfg.thinkingConfig = { 
+         includeThoughts: true,
+         thinkingLevel: thinkingLevel 
+       };
     }
 
     const tools = this.config.enableTools
@@ -763,6 +927,36 @@ export class RayaAIService {
 
   public getProvider(): AIProvider {
     return this.provider;
+  }
+
+  /**
+   * Heuristic to determine if the message requires "thinking" tokens.
+   * Simple greetings or very short messages don't need academic reasoning.
+   */
+  public shouldEnableThinking(message: string): boolean {
+    const text = message.toLowerCase().trim();
+    
+    // List of "simple" patterns that don't need thinking
+    const simplePatterns = [
+      /^salut/i, /^bonjour/i, /^coucou/i, /^hello/i, /^hi/i,
+      /^ça va/i, /^comment vas-tu/i, /^comment ca va/i,
+      /^merci/i, /^thanks/i, /^ok/i, /^d'accord/i,
+      /^oui/i, /^non/i, /^yes/i, /^no/i,
+      /^\?+$/, /^!+$/,
+      /^re/i, /^test/i, /^yo/i, /^wesh/i, /^hey/i
+    ];
+
+    // Seuil de longueur plus élevé pour forcer le thinking uniquement sur les vraies questions
+    if (text.length < 25) return false;
+    if (simplePatterns.some(p => p.test(text))) return false;
+    
+    // Si le message ne contient pas de verbe d'action ou de point d'interrogation, probablement pas besoin de thinking
+    const hasQuestion = text.includes('?');
+    const hasComplexKeywords = /(pourquoi|comment|explique|aide-moi|exercice|problème|théorème|calcul|analyse)/i.test(text);
+    
+    if (!hasQuestion && !hasComplexKeywords) return false;
+    
+    return true;
   }
 }
 

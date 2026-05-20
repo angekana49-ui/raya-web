@@ -67,7 +67,9 @@ Deno.serve(async (req) => {
     }
 
     const body = await req.json()
-    const { conversation_id, session_summary } = body
+    // Support direct calls ({ conversation_id }) OR Supabase Update Webhooks ({ record: { conversation_id }})
+    const conversation_id = body.conversation_id || body.record?.conversation_id
+    const session_summary = body.session_summary
 
     // Init Supabase
     const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY, {

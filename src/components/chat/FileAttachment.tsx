@@ -1,6 +1,7 @@
 "use client";
 
 import { X, FileText, File, Image as ImageIcon, Paperclip } from "lucide-react";
+import Image from "next/image";
 import type { AttachedFile } from "@/types";
 
 interface FileAttachmentProps {
@@ -70,9 +71,11 @@ export default function FileAttachment({
             >
               {file.type === "image" ? (
                 <div className="relative overflow-hidden rounded-lg">
-                  <img
+                  <Image
                     src={file.url}
                     alt={file.name}
+                    width={132}
+                    height={96}
                     className="w-full h-24 object-cover bg-slate-100 transition-transform duration-300 group-hover:scale-[1.03]"
                   />
                   <div className="absolute inset-x-0 bottom-0 h-9 bg-gradient-to-t from-black/50 to-transparent" />

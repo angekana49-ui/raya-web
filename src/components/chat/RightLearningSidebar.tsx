@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import Image from "next/image";
 import { X, BarChart3, Target, Sparkles } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { NoTranslate } from "@/components/ui/NoTranslate";
@@ -47,7 +48,7 @@ export default function RightLearningSidebar(props: RightLearningSidebarProps) {
       )}
     >
       <div className="flex items-center gap-2 px-4 pt-4 pb-2">
-        <img src="/raya-logo.jpeg" alt="RAYA" className="w-8 h-8 rounded-lg object-cover" />
+        <Image src="/raya-logo.jpeg" alt="RAYA" width={32} height={32} className="rounded-lg object-cover" />
         <span className="flex-1 text-lg font-bold text-primary">
           <NoTranslate>RAYA Progress</NoTranslate>
         </span>

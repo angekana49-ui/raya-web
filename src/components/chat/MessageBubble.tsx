@@ -1,94 +1,17 @@
 "use client";
 
+import dynamic from "next/dynamic";
+import Image from "next/image";
 import { useEffect, useState, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { FileText, File, Image as ImageIcon, ChevronDown, ChevronLeft, ChevronRight, X, ExternalLink, Edit2, Send } from "lucide-react";
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
-import remarkMath from "remark-math";
-import rehypeKatex from "rehype-katex";
-import type { Components } from "react-markdown";
 import type { Message, AttachedFile } from "@/types";
 import { formatTime } from "@/lib/utils";
 
-// ─── Markdown + LaTeX component map ──────────────────────────────────────────
-const PROSE: Components = {
-  // Headings
-  h1: ({ children }) => (
-    <h1 className="text-xl font-bold text-gray-900 mt-5 mb-2 first:mt-0 border-b border-slate-100 pb-1">{children}</h1>
-  ),
-  h2: ({ children }) => (
-    <h2 className="text-lg font-semibold text-gray-900 mt-4 mb-2 first:mt-0">{children}</h2>
-  ),
-  h3: ({ children }) => (
-    <h3 className="text-base font-semibold text-gray-800 mt-3 mb-1 first:mt-0">{children}</h3>
-  ),
-  // Paragraph
-  p: ({ children }) => <p className="mb-2.5 last:mb-0 leading-[1.7]">{children}</p>,
-  // Emphasis
-  strong: ({ children }) => <strong className="font-semibold text-gray-900">{children}</strong>,
-  em: ({ children }) => <em className="italic text-gray-700">{children}</em>,
-  // Lists
-  ul: ({ children }) => (
-    <ul className="mb-2.5 space-y-1 pl-5 list-disc marker:text-primary/60">{children}</ul>
-  ),
-  ol: ({ children }) => (
-    <ol className="mb-2.5 space-y-1 pl-5 list-decimal marker:text-gray-500">{children}</ol>
-  ),
-  li: ({ children }) => <li className="leading-[1.65] pl-0.5">{children}</li>,
-  // Code
-  code: ({ className, children }) => {
-    const isBlock = !!className;
-    if (isBlock) {
-      return <code className={`${className} font-mono text-sm`}>{children}</code>;
-    }
-    return (
-      <code className="bg-slate-100 text-slate-800 border border-slate-200 rounded-md px-1.5 py-0.5 text-[0.82em] font-mono">
-        {children}
-      </code>
-    );
-  },
-  pre: ({ children }) => (
-    <pre className="bg-slate-900 text-slate-100 rounded-xl px-4 py-3.5 my-3 overflow-x-auto text-sm font-mono leading-relaxed">
-      {children}
-    </pre>
-  ),
-  // Blockquote
-  blockquote: ({ children }) => (
-    <blockquote className="border-l-[3px] border-primary/50 pl-4 my-3 text-gray-600 italic bg-primary/[0.03] rounded-r-lg py-1">
-      {children}
-    </blockquote>
-  ),
-  // Tables
-  table: ({ children }) => (
-    <div className="overflow-x-auto my-3 rounded-xl border border-slate-200 shadow-sm">
-      <table className="min-w-full text-sm">{children}</table>
-    </div>
-  ),
-  thead: ({ children }) => <thead className="bg-slate-50 border-b border-slate-200">{children}</thead>,
-  th: ({ children }) => (
-    <th className="px-3 py-2 text-left font-semibold text-slate-700 text-xs uppercase tracking-wide">
-      {children}
-    </th>
-  ),
-  td: ({ children }) => (
-    <td className="px-3 py-2 border-b border-slate-100 text-gray-700">{children}</td>
-  ),
-  tr: ({ children }) => <tr className="even:bg-slate-50/50">{children}</tr>,
-  // Horizontal rule
-  hr: () => <hr className="border-slate-200 my-4" />,
-  // Links
-  a: ({ href, children }) => (
-    <a
-      href={href}
-      target="_blank"
-      rel="noopener noreferrer"
-      className="text-primary underline underline-offset-2 hover:text-primary/75 transition-colors"
-    >
-      {children}
-    </a>
-  ),
-};
+const MarkdownRenderer = dynamic(() => import("./MarkdownRenderer"), {
+  loading: () => <div className="animate-pulse bg-slate-100 h-20 w-full rounded-lg" />,
+  ssr: false,
+});
 
 interface MessageBubbleProps {
   message: Message;
@@ -103,35 +26,55 @@ interface MessageBubbleProps {
 
 function InfinityRailThinkingIcon() {
   return (
-    <svg
-      viewBox="0 0 120 60"
-      className="w-6 h-4 text-primary"
-      aria-hidden="true"
-    >
-      <path
-        id="thinking-infinity-path"
-        d="M 10 30
-           C 10 12, 38 12, 60 30
-           C 82 48, 110 48, 110 30
-           C 110 12, 82 12, 60 30
-           C 38 48, 10 48, 10 30"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="5"
-        strokeLinecap="round"
-        opacity="0.25"
-      />
-      <circle r="4" fill="currentColor">
-        <animateMotion dur="1.6s" repeatCount="indefinite" rotate="auto">
-          <mpath href="#thinking-infinity-path" />
-        </animateMotion>
-      </circle>
-      <circle r="2.5" fill="currentColor" opacity="0.6">
-        <animateMotion dur="1.6s" begin="0.8s" repeatCount="indefinite" rotate="auto">
-          <mpath href="#thinking-infinity-path" />
-        </animateMotion>
-      </circle>
-    </svg>
+    <div className="flex items-center gap-3 px-4 py-2 rounded-2xl bg-white/50 backdrop-blur-sm border border-white/20 shadow-sm transition-all animate-in fade-in slide-in-from-left-2">
+      <div className="relative">
+        <motion.div
+          animate={{ 
+            scale: [1, 1.2, 1], 
+            opacity: [0.3, 0.6, 0.3],
+            background: [
+              "radial-gradient(circle, rgba(99,102,241,0.4) 0%, transparent 70%)",
+              "radial-gradient(circle, rgba(139,92,246,0.4) 0%, transparent 70%)",
+              "radial-gradient(circle, rgba(99,102,241,0.4) 0%, transparent 70%)"
+            ]
+          }}
+          transition={{ duration: 4, repeat: Infinity, ease: "easeInOut" }}
+          className="absolute -inset-2 blur-xl rounded-full"
+        />
+        <svg
+          viewBox="0 0 120 60"
+          className="w-8 h-5 text-indigo-600 relative z-10"
+          aria-hidden="true"
+        >
+          <path
+            id="thinking-infinity-path"
+            d="M 10 30
+               C 10 12, 38 12, 60 30
+               C 82 48, 110 48, 110 30
+               C 110 12, 82 12, 60 30
+               C 38 48, 10 48, 10 30"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="6"
+            strokeLinecap="round"
+            opacity="0.2"
+          />
+          <circle r="5" fill="currentColor">
+            <animateMotion dur="2s" repeatCount="indefinite" rotate="auto">
+              <mpath href="#thinking-infinity-path" />
+            </animateMotion>
+          </circle>
+          <circle r="3" fill="currentColor" opacity="0.6">
+            <animateMotion dur="2s" begin="1s" repeatCount="indefinite" rotate="auto">
+              <mpath href="#thinking-infinity-path" />
+            </animateMotion>
+          </circle>
+        </svg>
+      </div>
+      <span className="text-[11px] font-bold text-slate-400 uppercase tracking-widest animate-pulse">
+        Thinking...
+      </span>
+    </div>
   );
 }
 
@@ -178,8 +121,8 @@ function AttachedFileDisplay({
   );
 }
 
-export default function MessageBubble({ 
-  message, 
+export default function MessageBubble({
+  message,
   isStreaming = false,
   onEdit,
   siblingCount = 1,
@@ -189,7 +132,29 @@ export default function MessageBubble({
   const isUser = message.sender === "user";
   const [previewFile, setPreviewFile] = useState<AttachedFile | null>(null);
   const [isEditing, setIsEditing] = useState(false);
-  const [editValue, setEditValue] = useState(message.text);
+  
+  let displayMessageText = message.text;
+  let parsedFiles: AttachedFile[] = message.files ? [...message.files] : [];
+
+  if (isUser && displayMessageText) {
+    const fileUrlMatch = displayMessageText.match(/\[Attached file URLs:\s*(.*?)\]/);
+    if (fileUrlMatch) {
+      const urls = fileUrlMatch[1].split(',').map(s => s.trim());
+      urls.forEach(url => {
+        if (!parsedFiles.some(f => f.url === url)) {
+          parsedFiles.push({
+            id: url,
+            name: url.split('/').pop()?.split('?')[0] || 'Attached File',
+            url: url,
+            type: url.includes('.pdf') ? 'pdf' : url.includes('.jpg') || url.includes('.png') ? 'image' : 'document'
+          });
+        }
+      });
+      displayMessageText = displayMessageText.replace(/\[Attached file URLs:\s*(.*?)\]/g, '').trim();
+    }
+  }
+
+  const [editValue, setEditValue] = useState(displayMessageText);
   const editContainerRef = useRef<HTMLDivElement>(null);
 
   // Cancel edit when clicking outside the edit area
@@ -198,7 +163,7 @@ export default function MessageBubble({
     const handleClickOutside = (e: MouseEvent) => {
       if (editContainerRef.current && !editContainerRef.current.contains(e.target as Node)) {
         setIsEditing(false);
-        setEditValue(message.text);
+        setEditValue(displayMessageText);
       }
     };
     // Small delay to avoid the click that opened the editor from immediately closing it
@@ -209,18 +174,18 @@ export default function MessageBubble({
       clearTimeout(timeout);
       document.removeEventListener('mousedown', handleClickOutside);
     };
-  }, [isEditing, message.text]);
+  }, [isEditing, displayMessageText]);
 
   // Auto-cancel edit when the AI starts streaming (user sent another message)
   useEffect(() => {
     if (isStreaming && isEditing) {
       setIsEditing(false);
-      setEditValue(message.text);
+      setEditValue(displayMessageText);
     }
   }, [isStreaming]);
 
   const handleSaveEdit = () => {
-    if (editValue.trim() && editValue !== message.text && onEdit) {
+    if (editValue.trim() && editValue !== displayMessageText && onEdit) {
       onEdit(message.id, editValue.trim());
     }
     setIsEditing(false);
@@ -235,11 +200,14 @@ export default function MessageBubble({
         transition={{ duration: 0.2 }}
         className="mb-5 ml-auto max-w-[85%] sm:max-w-[75%] md:max-w-[70%] lg:max-w-[620px] group relative"
       >
-        <div translate="no" className="notranslate msg-body px-4 py-3 rounded-[20px] bg-[linear-gradient(145deg,var(--primary),var(--primary-dark))] text-white rounded-br-md shadow-[0_8px_24px_rgba(90,108,255,0.25)]">
+        <div 
+          translate="no" 
+          className="notranslate msg-body px-5 py-3.5 rounded-[24px] bg-[linear-gradient(280deg,#6366f1,#8b5cf6,#818cf8,#6366f1)] bg-[length:400%_400%] animate-[gradientFlow_20s_ease_infinite] text-white rounded-br-md shadow-[0_12px_40px_-12px_rgba(99,102,241,0.2)] border border-white/20 ring-1 ring-white/10"
+        >
           {!isEditing && onEdit && (
             <button
               onClick={() => {
-                setEditValue(message.text);
+                setEditValue(displayMessageText);
                 setIsEditing(true);
               }}
               className="sm:absolute sm:-left-10 sm:top-2 sm:p-2 p-1.5 rounded-full text-white/60 sm:text-slate-400 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity hover:bg-white/10 sm:hover:bg-slate-100 sm:hover:text-slate-600 float-right ml-2 -mt-1 sm:float-none sm:ml-0 sm:mt-0"
@@ -249,12 +217,12 @@ export default function MessageBubble({
             </button>
           )}
 
-          {message.files && message.files.length > 0 && (
+          {parsedFiles && parsedFiles.length > 0 && (
             <div className="mb-2 -mx-1 px-1 overflow-x-auto">
               <div className="flex gap-2 min-w-max">
-              {message.files.map((file) => (
-                <AttachedFileDisplay key={file.id} file={file} onPreview={setPreviewFile} />
-              ))}
+                {parsedFiles.map((file) => (
+                  <AttachedFileDisplay key={file.id} file={file} onPreview={setPreviewFile} />
+                ))}
               </div>
             </div>
           )}
@@ -271,7 +239,7 @@ export default function MessageBubble({
                     handleSaveEdit();
                   } else if (e.key === 'Escape') {
                     setIsEditing(false);
-                    setEditValue(message.text);
+                    setEditValue(displayMessageText);
                   }
                 }}
                 className="w-full bg-white/10 border border-white/20 rounded-lg p-2 sm:p-2 text-sm sm:text-base text-white placeholder-white/50 focus:outline-none focus:ring-2 focus:ring-white/50 resize-none min-h-[60px] sm:min-h-[80px]"
@@ -282,7 +250,7 @@ export default function MessageBubble({
                   type="button"
                   onClick={() => {
                     setIsEditing(false);
-                    setEditValue(message.text);
+                    setEditValue(displayMessageText);
                   }}
                   className="px-3 py-2 sm:py-1.5 text-xs sm:text-xs font-medium rounded-lg bg-white/10 hover:bg-white/20 active:bg-white/30 transition-colors"
                 >
@@ -291,7 +259,7 @@ export default function MessageBubble({
                 <button
                   type="button"
                   onClick={handleSaveEdit}
-                  disabled={!editValue.trim() || editValue === message.text}
+                  disabled={!editValue.trim() || editValue === displayMessageText}
                   className="px-3 py-2 sm:py-1.5 text-xs sm:text-xs font-medium rounded-lg bg-white text-primary hover:bg-white/90 active:bg-white/80 transition-colors disabled:opacity-50 flex items-center gap-1.5"
                 >
                   <Send className="w-3.5 h-3.5" />
@@ -300,7 +268,7 @@ export default function MessageBubble({
               </div>
             </div>
           ) : (
-            <p className="chat-text text-base whitespace-pre-wrap">{message.text}</p>
+            <p className="chat-text text-base whitespace-pre-wrap">{displayMessageText}</p>
           )}
 
           {siblingCount > 1 && !isEditing && (
@@ -383,11 +351,14 @@ export default function MessageBubble({
 
                 <div className="bg-slate-50 max-h-[70vh] overflow-auto flex items-center justify-center p-3">
                   {previewFile.type === "image" ? (
-                    <img
-                      src={previewFile.url}
-                      alt={previewFile.name}
-                      className="max-w-full max-h-[68vh] object-contain rounded-xl"
-                    />
+                    <div className="relative w-full h-[68vh]">
+                      <Image
+                        src={previewFile.url}
+                        alt={previewFile.name}
+                        fill
+                        className="object-contain rounded-xl"
+                      />
+                    </div>
                   ) : previewFile.type === "pdf" ? (
                     <iframe
                       src={previewFile.url}
@@ -421,52 +392,52 @@ export default function MessageBubble({
   // Assistant message: plain text while streaming, full Markdown + LaTeX once complete.
   return (
     <motion.div
-      initial={{ opacity: 0, y: 10 }}
+      initial={{ opacity: 0, y: 15 }}
       animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.2 }}
-      className="mb-5 w-full"
+      transition={{ duration: 0.35, ease: "easeOut" }}
+      className="mb-12 w-full group relative"
     >
-      <div translate="no" className="notranslate msg-body text-gray-900 max-w-[760px]">
+      {/* Gemini-style Subtle Aura - larger and fainter for the free-zone */}
+      <div className="absolute -inset-x-8 -inset-y-12 bg-gradient-to-r from-indigo-500/5 via-violet-500/5 to-blue-500/5 blur-[100px] rounded-full opacity-0 group-hover:opacity-100 transition-opacity duration-1000 pointer-events-none" />
+      
+      <div 
+        translate="no" 
+        className="notranslate msg-body py-4 md:py-6 pr-4 md:pr-10 text-slate-800 max-w-[840px] leading-relaxed relative z-10"
+      >
         <div className="chat-text text-base">
           {isStreaming ? (
             // Fast plain-text during stream — no KaTeX/markdown parse overhead
             <p className="whitespace-pre-wrap leading-[1.7]">{message.text}</p>
           ) : (
-            <ReactMarkdown
-              remarkPlugins={[remarkGfm, remarkMath]}
-              rehypePlugins={[[rehypeKatex, { throwOnError: false, strict: false }]]}
-              components={PROSE}
-            >
-              {message.text}
-            </ReactMarkdown>
+            <MarkdownRenderer content={message.text} />
           )}
         </div>
 
         {siblingCount > 1 && (
-            <div className="flex items-center justify-start gap-1.5 sm:gap-2 mt-2 pt-1">
-              <span className="text-[10px] sm:text-[11px] text-slate-400 font-medium">
-                {siblingIndex + 1} / {siblingCount}
-              </span>
-              <div className="flex gap-1">
-                <button
-                  disabled={siblingIndex === 0}
-                  onClick={() => onNavigateBranch?.('prev')}
-                  className="p-1.5 sm:p-1 rounded hover:bg-slate-100 active:bg-slate-200 disabled:opacity-30 transition-colors"
-                  title="Previous branch"
-                >
-                  <ChevronLeft className="w-4 h-4 sm:w-3.5 sm:h-3.5 text-slate-400" />
-                </button>
-                <button
-                  disabled={siblingIndex === siblingCount - 1}
-                  onClick={() => onNavigateBranch?.('next')}
-                  className="p-1.5 sm:p-1 rounded hover:bg-slate-100 active:bg-slate-200 disabled:opacity-30 transition-colors"
-                  title="Next branch"
-                >
-                  <ChevronRight className="w-4 h-4 sm:w-3.5 sm:h-3.5 text-slate-400" />
-                </button>
-              </div>
+          <div className="flex items-center justify-start gap-1.5 sm:gap-2 mt-2 pt-1">
+            <span className="text-[10px] sm:text-[11px] text-slate-400 font-medium">
+              {siblingIndex + 1} / {siblingCount}
+            </span>
+            <div className="flex gap-1">
+              <button
+                disabled={siblingIndex === 0}
+                onClick={() => onNavigateBranch?.('prev')}
+                className="p-1.5 sm:p-1 rounded hover:bg-slate-100 active:bg-slate-200 disabled:opacity-30 transition-colors"
+                title="Previous branch"
+              >
+                <ChevronLeft className="w-4 h-4 sm:w-3.5 sm:h-3.5 text-slate-400" />
+              </button>
+              <button
+                disabled={siblingIndex === siblingCount - 1}
+                onClick={() => onNavigateBranch?.('next')}
+                className="p-1.5 sm:p-1 rounded hover:bg-slate-100 active:bg-slate-200 disabled:opacity-30 transition-colors"
+                title="Next branch"
+              >
+                <ChevronRight className="w-4 h-4 sm:w-3.5 sm:h-3.5 text-slate-400" />
+              </button>
             </div>
-          )}
+          </div>
+        )}
 
         {message.timestamp && (
           <p className="text-xs mt-2 text-gray-400">{formatTime(message.timestamp)}</p>
@@ -489,11 +460,11 @@ export function TypingIndicator() {
   }, []);
 
   return (
-    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="mb-3 w-full">
-      <div className="max-w-[760px] rounded-xl border border-slate-200/70 bg-white/80 px-3 py-2 shadow-sm">
-        <div className="flex items-center gap-2 text-sm text-slate-700">
+    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="mb-6 w-full">
+      <div className="max-w-[760px] px-1 py-2">
+        <div className="flex items-center gap-3 text-sm font-medium text-slate-500">
           <InfinityRailThinkingIcon />
-          <span>{steps[stepIndex]}</span>
+          <span className="animate-pulse">{steps[stepIndex]}</span>
         </div>
 
         <button
@@ -511,9 +482,8 @@ export function TypingIndicator() {
             {steps.map((step, index) => (
               <li key={step} className="flex items-center gap-2">
                 <span
-                  className={`inline-block h-1.5 w-1.5 rounded-full ${
-                    index <= stepIndex ? "bg-primary" : "bg-slate-300"
-                  }`}
+                  className={`inline-block h-1.5 w-1.5 rounded-full ${index <= stepIndex ? "bg-primary" : "bg-slate-300"
+                    }`}
                 />
                 <span>{step}</span>
               </li>

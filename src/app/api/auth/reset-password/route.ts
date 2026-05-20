@@ -2,17 +2,21 @@ import { NextRequest, NextResponse } from "next/server";
 import { Resend } from "resend";
 import { supabaseAdmin } from "@/lib/supabase/server";
 import { rayaPasswordResetTemplate } from "@/lib/email-templates";
+import { verifyTurnstileToken } from "@/lib/turnstile";
 
 const resend = new Resend(process.env.RESEND_API_KEY);
 const FROM = process.env.RESEND_FROM_EMAIL ?? "RAYA <noreply@raya.app>";
 const APP_URL = process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";
 
 export async function POST(req: NextRequest) {
-  const { email } = await req.json();
+  const { email, captchaToken } = await req.json();
 
   if (!email) {
     return NextResponse.json({ error: "Email required." }, { status: 400 });
   }
+
+  const captchaCheck = await verifyTurnstileToken(captchaToken);
+  if (!captchaCheck.ok) return captchaCheck.response;
 
   const { data, error } = await supabaseAdmin.auth.admin.generateLink({
     type: "recovery",

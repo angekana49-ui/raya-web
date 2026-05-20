@@ -1,8 +1,14 @@
 import type { Metadata } from "next";
+import { Analytics } from "@vercel/analytics/next";
+// Avoid fetching Google Fonts at build time in environments without network access.
 import Script from "next/script";
 import "./globals.css";
 import "katex/dist/katex.min.css";
 import { GoogleTranslateScript } from "@/components/menus/LanguageMenu";
+import SocialNotificationCenter from "@/components/social/SocialNotificationCenter";
+import UnifiedToastStack from "@/components/notifications/UnifiedToastStack";
+
+// Using system/local fonts to prevent remote fetch during build.
 
 const siteUrl = "https://raya.thebluestift.com";
 const normalizedSiteUrl = (process.env.NEXT_PUBLIC_APP_URL ?? siteUrl).replace(/\/$/, "");
@@ -96,22 +102,22 @@ export default function RootLayout({
   return (
     <html lang="en">
       <head>
-        <Script
-          src="https://www.googletagmanager.com/gtag/js?id=G-ZN54V4B17X"
-          strategy="afterInteractive"
-        />
-        <Script id="google-analytics" strategy="afterInteractive">
-          {`
-            window.dataLayer = window.dataLayer || [];
-            function gtag(){dataLayer.push(arguments);}
-            gtag('js', new Date());
-            gtag('config', 'G-ZN54V4B17X');
-          `}
-        </Script>
-        <link
-          href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;1,9..40,400&display=swap"
-          rel="stylesheet"
-        />
+        { !normalizedSiteUrl.includes('localhost') && (
+          <>
+            <Script
+              src="https://www.googletagmanager.com/gtag/js?id=G-ZN54V4B17X"
+              strategy="afterInteractive"
+            />
+            <Script id="google-analytics" strategy="afterInteractive">
+              {`
+                window.dataLayer = window.dataLayer || [];
+                function gtag(){dataLayer.push(arguments);}
+                gtag('js', new Date());
+                gtag('config', 'G-ZN54V4B17X');
+              `}
+            </Script>
+          </>
+        )}
         <link rel="icon" type="image/png" href="/favicon-96x96.png" sizes="96x96" />
         <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
         <link rel="shortcut icon" href="/favicon.ico" />
@@ -122,9 +128,12 @@ export default function RootLayout({
           dangerouslySetInnerHTML={{ __html: JSON.stringify(organizationSchema) }}
         />
       </head>
-      <body className="antialiased font-sans">
+      <body className={`antialiased font-sans`} suppressHydrationWarning>
         {children}
         <GoogleTranslateScript />
+        <SocialNotificationCenter />
+        <UnifiedToastStack />
+        <Analytics />
       </body>
     </html>
   );
